@@ -1,0 +1,10 @@
+{
+  "name": "Regex Three Level Organizer",
+  "display_name": "正则三级分组整理器",
+  "loading_order": 95,
+  "js": "index.js",
+  "css": "style.css",
+  "author": "Kilo",
+  "version": "0.1.0",
+  "description": "Add three-level grouping for SillyTavern regex lists with toolbar buttons and drag-to-group organization."
+}

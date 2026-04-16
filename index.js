@@ -7,6 +7,8 @@
   const STORE_RULES = `${MODULE}:rule-groups`;
   const STORE_GROUP_COLLAPSE = `${MODULE}:group-collapse`;
   const STORE_MODE = `${MODULE}:display-mode`;
+  const q = (selector, root = document) => root.querySelector(selector);
+  const qa = (selector, root = document) => Array.from(root.querySelectorAll(selector));
 
   const SCOPES = [
     {
@@ -40,6 +42,8 @@
 
   let state = loadState();
   let activeScope = 'global';
+  let isApplyingGrouping = false;
+  let startTimer = null;
 
   function uid(prefix) {
     return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -91,7 +95,7 @@
   }
 
   function ensurePanel() {
-    let panel = document.getElementById(PANEL_ID);
+    let panel = q(`#${PANEL_ID}`);
     if (panel) return panel;
     panel = document.createElement('div');
     panel.id = PANEL_ID;
@@ -271,9 +275,11 @@
         ${SCOPES.map((scope) => `<button type="button" class="st-r3o-scope-tab" data-r3o-action="scope" data-scope="${scope.key}" data-active="${scope.key === activeScope ? '1' : '0'}">${scope.label}</button>`).join('')}
       </div>
       <div class="st-r3o-tools">
-        <button type="button" data-r3o-action="toggle-display">${state.displayMode[activeScope] ? '关闭列表分组' : '开启列表分组'}</button>
-        <button type="button" data-r3o-action="add-root">新建一级组</button>
-        <button type="button" data-r3o-action="scan">刷新规则列表</button>
+        <button type="button" class="menu_button interactable" data-r3o-action="toggle-display">${state.displayMode[activeScope] ? '关闭列表分组' : '开启列表分组'}</button>
+        <button type="button" class="menu_button interactable" data-r3o-action="expand-all">全部展开</button>
+        <button type="button" class="menu_button interactable" data-r3o-action="collapse-all">全部收纳</button>
+        <button type="button" class="menu_button interactable" data-r3o-action="add-root">新建一级组</button>
+        <button type="button" class="menu_button interactable" data-r3o-action="scan">刷新规则列表</button>
       </div>
       <div class="st-r3o-dropzone" data-r3o-drop="[]">
         <b>未分组</b>
@@ -296,12 +302,12 @@
       return `
         <div>
           <div class="st-r3o-group" data-r3o-drop='${escapeAttr(JSON.stringify(path))}' style="margin-left:${depth * 14}px">
-            <button type="button" data-r3o-action="toggle-group" data-path='${escapeAttr(JSON.stringify(path))}'>${collapsed ? '+' : '-'}</button>
+            <button type="button" class="menu_button interactable" data-r3o-action="toggle-group" data-path='${escapeAttr(JSON.stringify(path))}'>${collapsed ? '+' : '-'}</button>
             <b>${escapeHtml(group.name)}</b>
             <span class="st-r3o-level">L${path.length}</span>
-            <button type="button" data-r3o-action="add-child" data-path='${escapeAttr(JSON.stringify(path))}'>+子组</button>
-            <button type="button" data-r3o-action="rename-group" data-path='${escapeAttr(JSON.stringify(path))}'>改名</button>
-            <button type="button" data-r3o-action="delete-group" data-path='${escapeAttr(JSON.stringify(path))}'>删组</button>
+            <button type="button" class="menu_button interactable" data-r3o-action="add-child" data-path='${escapeAttr(JSON.stringify(path))}'>+子组</button>
+            <button type="button" class="menu_button interactable" data-r3o-action="rename-group" data-path='${escapeAttr(JSON.stringify(path))}'>改名</button>
+            <button type="button" class="menu_button interactable" data-r3o-action="delete-group" data-path='${escapeAttr(JSON.stringify(path))}'>删组</button>
           </div>
           ${collapsed ? '' : rules.map((rule) => renderRuleRow(rule, depth + 1)).join('')}
           ${collapsed ? '' : renderGroups(scopeKey, Array.isArray(group.children) ? group.children : [], path, depth + 1)}
@@ -349,7 +355,24 @@
         state.displayMode[activeScope] = !state.displayMode[activeScope];
         saveState();
         applyGrouping(activeScope);
+        syncToolbarButtons();
         renderPanel();
+      }
+      if (action === 'expand-all') {
+        Object.keys(state.collapsed)
+          .filter((key) => key.startsWith(`${activeScope}:`))
+          .forEach((key) => { state.collapsed[key] = false; });
+        saveState();
+        renderPanel();
+        applyGrouping(activeScope);
+      }
+      if (action === 'collapse-all') {
+        collectGroupPaths(activeScope, ensureScopeGroups(activeScope)).forEach((path) => {
+          state.collapsed[`${activeScope}:${path.join('/')}`] = true;
+        });
+        saveState();
+        renderPanel();
+        applyGrouping(activeScope);
       }
       if (action === 'add-root') addGroup(activeScope, []);
       if (action === 'scan') renderPanel();
@@ -395,72 +418,86 @@
     }
   }
 
+  function collectGroupPaths(scopeKey, groups, parentPath = []) {
+    const out = [];
+    for (const group of groups) {
+      const path = parentPath.concat(group.name);
+      out.push(path);
+      if (Array.isArray(group.children) && group.children.length) {
+        out.push(...collectGroupPaths(scopeKey, group.children, path));
+      }
+    }
+    return out;
+  }
+
   function applyGrouping(scopeKey) {
+    if (isApplyingGrouping) return;
     const listEl = getListEl(scopeKey);
     if (!listEl) return;
 
-    cleanupGrouping(listEl);
-    if (!state.displayMode[scopeKey]) return;
+    isApplyingGrouping = true;
+    try {
+      cleanupGrouping(listEl);
+      if (!state.displayMode[scopeKey]) return;
 
-    const rules = getRules(scopeKey);
-    listEl.classList.add('st-r3o-grouping');
+      const rules = getRules(scopeKey);
+      listEl.classList.add('st-r3o-grouping');
 
-    const miscEls = Array.from(listEl.children).filter((el) => !el.classList.contains('regex-script-label'));
-    miscEls.forEach((el) => {
-      el.dataset.r3oPrevOrder = el.style.order || '';
-      el.style.order = '999999';
-    });
+      const miscEls = Array.from(listEl.children).filter((el) => !el.classList.contains('regex-script-label'));
+      miscEls.forEach((el) => {
+        el.dataset.r3oPrevOrder = el.style.order || '';
+        el.style.order = '999999';
+      });
 
-    const grouped = new Map();
-    for (const rule of rules) {
-      const path = getRulePath(scopeKey, rule.id);
-      const l1 = path[0] || '未分组';
-      const l2 = path[1] || '';
-      const l3 = path[2] || '';
-      const key = `${l1}\u001f${l2}\u001f${l3}`;
-      if (!grouped.has(key)) grouped.set(key, []);
-      grouped.get(key).push(rule);
-      rule.el.dataset.r3oDepth = String(Math.max(1, Math.min(path.length || 1, 3)));
-      rule.el.dataset.r3oL1 = l1;
-      rule.el.dataset.r3oL2 = l2;
-      rule.el.dataset.r3oL3 = l3;
+      for (const rule of rules) {
+        const path = getRulePath(scopeKey, rule.id);
+        const l1 = path[0] || '未分组';
+        const l2 = path[1] || '';
+        const l3 = path[2] || '';
+        rule.el.dataset.r3oDepth = String(Math.max(1, Math.min(path.length || 1, 3)));
+        rule.el.dataset.r3oL1 = l1;
+        rule.el.dataset.r3oL2 = l2;
+        rule.el.dataset.r3oL3 = l3;
+      }
+
+      let order = 0;
+      const insertedL1 = new Set();
+      const insertedL2 = new Set();
+      const insertedL3 = new Set();
+
+      for (const rule of rules) {
+        const path = getRulePath(scopeKey, rule.id);
+        const l1 = path[0] || '未分组';
+        const l2 = path[1] || '';
+        const l3 = path[2] || '';
+        const k1 = l1;
+        const k2 = `${l1}\u001f${l2}`;
+        const k3 = `${l1}\u001f${l2}\u001f${l3}`;
+
+        if (!insertedL1.has(k1)) {
+          insertedL1.add(k1);
+          listEl.appendChild(createListHeader(scopeKey, [l1], 1));
+          listEl.lastElementChild.style.order = String(order++);
+        }
+        if (l2 && !insertedL2.has(k2)) {
+          insertedL2.add(k2);
+          listEl.appendChild(createListHeader(scopeKey, [l1, l2], 2));
+          listEl.lastElementChild.style.order = String(order++);
+        }
+        if (l3 && !insertedL3.has(k3)) {
+          insertedL3.add(k3);
+          listEl.appendChild(createListHeader(scopeKey, [l1, l2, l3], 3));
+          listEl.lastElementChild.style.order = String(order++);
+        }
+
+        rule.el.dataset.r3oPrevOrder = rule.el.style.order || '';
+        rule.el.style.order = String(order++);
+      }
+
+      applyListCollapse(scopeKey, listEl);
+    } finally {
+      isApplyingGrouping = false;
     }
-
-    let order = 0;
-    const insertedL1 = new Set();
-    const insertedL2 = new Set();
-    const insertedL3 = new Set();
-
-    for (const rule of rules) {
-      const path = getRulePath(scopeKey, rule.id);
-      const l1 = path[0] || '未分组';
-      const l2 = path[1] || '';
-      const l3 = path[2] || '';
-      const k1 = l1;
-      const k2 = `${l1}\u001f${l2}`;
-      const k3 = `${l1}\u001f${l2}\u001f${l3}`;
-
-      if (!insertedL1.has(k1)) {
-        insertedL1.add(k1);
-        listEl.appendChild(createListHeader(scopeKey, [l1], 1));
-        listEl.lastElementChild.style.order = String(order++);
-      }
-      if (l2 && !insertedL2.has(k2)) {
-        insertedL2.add(k2);
-        listEl.appendChild(createListHeader(scopeKey, [l1, l2], 2));
-        listEl.lastElementChild.style.order = String(order++);
-      }
-      if (l3 && !insertedL3.has(k3)) {
-        insertedL3.add(k3);
-        listEl.appendChild(createListHeader(scopeKey, [l1, l2, l3], 3));
-        listEl.lastElementChild.style.order = String(order++);
-      }
-
-      rule.el.dataset.r3oPrevOrder = rule.el.style.order || '';
-      rule.el.style.order = String(order++);
-    }
-
-    applyListCollapse(scopeKey, listEl);
   }
 
   function cleanupGrouping(listEl) {
@@ -587,6 +624,7 @@
 
   function init() {
     const tryStart = () => {
+      if (isApplyingGrouping) return false;
       let hasAny = false;
       SCOPES.forEach((scope) => {
         hasAny = ensureToolbarButtons(scope.key) || hasAny;
@@ -604,7 +642,8 @@
 
     if (typeof MutationObserver === 'function') {
       const observer = new MutationObserver(() => {
-        tryStart();
+        clearTimeout(startTimer);
+        startTimer = setTimeout(tryStart, 80);
       });
       const root = document.body || document.documentElement;
       if (root) observer.observe(root, { childList: true, subtree: true });

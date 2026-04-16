@@ -1,8 +1,14 @@
 .st-r3o-toolbar-anchor {
+  display: block;
+  margin-top: 6px;
+}
+
+.st-r3o-toolbar-row {
   display: inline-flex;
   gap: 6px;
   align-items: center;
-  margin-left: 6px;
+  flex-wrap: wrap;
+  padding: 6px 0;
 }
 
 .st-r3o-panel {
@@ -22,6 +28,33 @@
 
 .st-r3o-hidden {
   display: none !important;
+}
+
+.st-r3o-scope-chooser {
+  position: fixed;
+  z-index: 10002;
+  min-width: 240px;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid var(--mainColor, rgba(255, 255, 255, 0.2));
+  background: var(--SmartThemeBlurTintColor, rgba(0, 0, 0, 0.8));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
+}
+
+.st-r3o-scope-chooser-title {
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+.st-r3o-scope-chooser-buttons,
+.st-r3o-scope-chooser-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.st-r3o-scope-chooser-actions {
+  margin-top: 8px;
 }
 
 .st-r3o-head {

@@ -2,8 +2,9 @@
   'use strict';
 
   const MODULE = 'st-regex-three-level-organizer';
-  const VERSION = '0.1.1';
+  const VERSION = '0.1.2';
   const PANEL_ID = 'st-r3o-panel';
+  const CHOOSER_ID = 'st-r3o-scope-chooser';
   const STORE_GROUPS = `${MODULE}:groups`;
   const STORE_RULES = `${MODULE}:rule-groups`;
   const STORE_GROUP_COLLAPSE = `${MODULE}:group-collapse`;
@@ -100,20 +101,50 @@
     return getToolbarEl('global') || getToolbarEl('preset') || getToolbarEl('scoped');
   }
 
-  function chooseScope(initialScope = activeScope) {
-    const current = getScopeConfig(initialScope);
-    const answer = prompt(
-      `选择作用域：\n1 全局正则\n2 预设正则\n3 局部正则\n\n可输入 1/2/3 或 global/preset/scoped`,
-      current?.key || 'global'
-    );
-    if (answer === null) return null;
+  function ensureScopeChooser() {
+    let chooser = q(`#${CHOOSER_ID}`);
+    if (chooser) return chooser;
 
-    const value = String(answer).trim().toLowerCase();
-    if (value === '1' || value === 'global' || value === '全局' || value === '全局正则') return 'global';
-    if (value === '2' || value === 'preset' || value === '预设' || value === '预设正则') return 'preset';
-    if (value === '3' || value === 'scoped' || value === 'local' || value === '局部' || value === '局部正则') return 'scoped';
-    alert('未识别的作用域');
-    return null;
+    chooser = document.createElement('div');
+    chooser.id = CHOOSER_ID;
+    chooser.className = 'st-r3o-scope-chooser st-r3o-hidden';
+    chooser.innerHTML = `
+      <div class="st-r3o-scope-chooser-title">选择作用域</div>
+      <div class="st-r3o-scope-chooser-buttons">
+        ${SCOPES.map((scope) => `<button type="button" class="menu_button interactable" data-r3o-choose-scope="${scope.key}">${scope.label}</button>`).join('')}
+      </div>
+      <div class="st-r3o-scope-chooser-actions">
+        <button type="button" class="menu_button interactable" data-r3o-choose-cancel="1">取消</button>
+      </div>
+    `;
+    document.body.appendChild(chooser);
+    return chooser;
+  }
+
+  function chooseScopeWithButtons(anchorEl, callback) {
+    const chooser = ensureScopeChooser();
+    const rect = anchorEl?.getBoundingClientRect?.() || { left: 24, bottom: 24 };
+    chooser.style.left = `${Math.max(12, Math.round(rect.left))}px`;
+    chooser.style.top = `${Math.max(12, Math.round(rect.bottom + 8))}px`;
+    chooser.classList.remove('st-r3o-hidden');
+
+    const close = () => {
+      chooser.classList.add('st-r3o-hidden');
+      chooser.onclick = null;
+    };
+
+    chooser.onclick = (event) => {
+      const scopeBtn = event.target.closest('[data-r3o-choose-scope]');
+      const cancelBtn = event.target.closest('[data-r3o-choose-cancel]');
+      if (cancelBtn) {
+        close();
+        return;
+      }
+      if (!scopeBtn) return;
+      const scopeKey = scopeBtn.dataset.r3oChooseScope;
+      close();
+      if (scopeKey) callback(scopeKey);
+    };
   }
 
   function ensurePanel() {
@@ -582,55 +613,7 @@
   }
 
   function ensureToolbarButtons() {
-    const toolbar = getPrimaryToolbarEl();
-    if (!toolbar) return false;
-    qa('.st-r3o-toolbar-anchor').forEach((el) => {
-      if (el.parentElement !== toolbar) el.remove();
-    });
-    if (toolbar.querySelector('[data-r3o-anchor="primary"]')) return true;
-
-    const wrap = document.createElement('div');
-    wrap.className = 'st-r3o-toolbar-anchor';
-    wrap.dataset.r3oAnchor = 'primary';
-
-    const addGroupBtn = document.createElement('button');
-    addGroupBtn.type = 'button';
-    addGroupBtn.className = 'menu_button interactable';
-    addGroupBtn.textContent = '新建分组';
-    addGroupBtn.onclick = () => {
-      const scopeKey = chooseScope(activeScope);
-      if (!scopeKey) return;
-      activeScope = scopeKey;
-      showPanel();
-      addGroup(scopeKey, []);
-    };
-
-    const organizerBtn = document.createElement('button');
-    organizerBtn.type = 'button';
-    organizerBtn.className = 'menu_button interactable';
-    organizerBtn.textContent = '分组整理';
-    organizerBtn.onclick = () => {
-      const scopeKey = chooseScope(activeScope);
-      if (!scopeKey) return;
-      activeScope = scopeKey;
-      showPanel();
-    };
-
-    const toggleBtn = document.createElement('button');
-    toggleBtn.type = 'button';
-    toggleBtn.className = 'menu_button interactable';
-    toggleBtn.textContent = '开启/关闭分组';
-    toggleBtn.dataset.r3oToggle = 'primary';
-    toggleBtn.onclick = () => {
-      const scopeKey = chooseScope(activeScope);
-      if (!scopeKey) return;
-      activeScope = scopeKey;
-      toggleDisplayForScope(scopeKey);
-    };
-
-    wrap.append(addGroupBtn, organizerBtn, toggleBtn);
-    toolbar.appendChild(wrap);
-    return true;
+    return !!createStandaloneToolbar();
   }
 
   function syncToolbarButtons() {
@@ -665,6 +648,61 @@
     if (sessionStorage.getItem(sessionKey) === VERSION) return;
     sessionStorage.setItem(sessionKey, VERSION);
     location.reload();
+  }
+
+  function createStandaloneToolbar() {
+    const host = getPrimaryToolbarEl();
+    if (!host) return null;
+
+    let wrap = q('[data-r3o-anchor="primary"]');
+    if (wrap && wrap.parentElement) return wrap;
+
+    wrap = document.createElement('div');
+    wrap.className = 'st-r3o-toolbar-anchor';
+    wrap.dataset.r3oAnchor = 'primary';
+
+    const row = document.createElement('div');
+    row.className = 'st-r3o-toolbar-row';
+
+    const addGroupBtn = document.createElement('button');
+    addGroupBtn.type = 'button';
+    addGroupBtn.className = 'menu_button interactable';
+    addGroupBtn.textContent = '新建分组';
+    addGroupBtn.onclick = (event) => {
+      chooseScopeWithButtons(event.currentTarget, (scopeKey) => {
+        activeScope = scopeKey;
+        showPanel();
+        addGroup(scopeKey, []);
+      });
+    };
+
+    const organizerBtn = document.createElement('button');
+    organizerBtn.type = 'button';
+    organizerBtn.className = 'menu_button interactable';
+    organizerBtn.textContent = '分组整理';
+    organizerBtn.onclick = (event) => {
+      chooseScopeWithButtons(event.currentTarget, (scopeKey) => {
+        activeScope = scopeKey;
+        showPanel();
+      });
+    };
+
+    const toggleBtn = document.createElement('button');
+    toggleBtn.type = 'button';
+    toggleBtn.className = 'menu_button interactable';
+    toggleBtn.textContent = '开启/关闭分组';
+    toggleBtn.dataset.r3oToggle = 'primary';
+    toggleBtn.onclick = (event) => {
+      chooseScopeWithButtons(event.currentTarget, (scopeKey) => {
+        activeScope = scopeKey;
+        toggleDisplayForScope(scopeKey);
+      });
+    };
+
+    row.append(addGroupBtn, organizerBtn, toggleBtn);
+    wrap.appendChild(row);
+    host.insertAdjacentElement('afterend', wrap);
+    return wrap;
   }
 
   function init() {

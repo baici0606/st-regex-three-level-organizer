@@ -2,7 +2,7 @@
   'use strict';
 
   const MODULE = 'st-regex-three-level-organizer';
-  const VERSION = '0.1.3';
+  const VERSION = '0.1.4';
   const PANEL_ID = 'st-r3o-panel';
   const CHOOSER_ID = 'st-r3o-scope-chooser';
   const STORE_GROUPS = `${MODULE}:groups`;
@@ -147,13 +147,6 @@
     const close = () => {
       chooser.classList.add('st-r3o-hidden');
       chooser.onclick = null;
-    };
-
-    chooser.onpointerdown = (event) => {
-      event.stopPropagation();
-    };
-    chooser.onmousedown = (event) => {
-      event.stopPropagation();
     };
 
     chooser.onclick = (event) => {
@@ -428,12 +421,6 @@
   }
 
   function bindPanelEvents(panel) {
-    panel.onpointerdown = (event) => {
-      event.stopPropagation();
-    };
-    panel.onmousedown = (event) => {
-      event.stopPropagation();
-    };
     panel.onclick = (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -740,9 +727,6 @@
 
     row.append(addGroupBtn, organizerBtn, toggleBtn);
     wrap.appendChild(row);
-    wrap.addEventListener('pointerdown', (event) => { event.stopPropagation(); }, true);
-    wrap.addEventListener('mousedown', (event) => { event.stopPropagation(); }, true);
-    wrap.addEventListener('click', (event) => { event.stopPropagation(); }, true);
     host.insertAdjacentElement('afterend', wrap);
     return wrap;
   }

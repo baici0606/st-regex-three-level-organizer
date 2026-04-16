@@ -2,7 +2,7 @@
   'use strict';
 
   const MODULE = 'st-regex-three-level-organizer';
-  const VERSION = '0.1.4';
+  const VERSION = '0.1.5';
   const PANEL_ID = 'st-r3o-panel';
   const CHOOSER_ID = 'st-r3o-scope-chooser';
   const STORE_GROUPS = `${MODULE}:groups`;
@@ -224,13 +224,34 @@
     return (h >>> 0).toString(36);
   }
 
+  function normalizeGroupPath(scopeKey, path) {
+    if (!Array.isArray(path) || path.length === 0) return [];
+
+    const normalized = [];
+    let list = ensureScopeGroups(scopeKey);
+    for (const segment of path.slice(0, 3)) {
+      const group = Array.isArray(list) ? list.find((item) => item.name === segment) : null;
+      if (!group) break;
+      normalized.push(group.name);
+      list = Array.isArray(group.children) ? group.children : [];
+    }
+    return normalized;
+  }
+
   function getRulePath(scopeKey, ruleId) {
-    return Array.isArray(state.ruleGroups?.[scopeKey]?.[ruleId]) ? state.ruleGroups[scopeKey][ruleId] : [];
+    const saved = Array.isArray(state.ruleGroups?.[scopeKey]?.[ruleId]) ? state.ruleGroups[scopeKey][ruleId] : [];
+    const normalized = normalizeGroupPath(scopeKey, saved);
+    if (!same(saved, normalized)) {
+      state.ruleGroups[scopeKey] = state.ruleGroups[scopeKey] || {};
+      state.ruleGroups[scopeKey][ruleId] = normalized;
+      saveState();
+    }
+    return normalized;
   }
 
   function setRulePath(scopeKey, ruleId, path) {
     state.ruleGroups[scopeKey] = state.ruleGroups[scopeKey] || {};
-    state.ruleGroups[scopeKey][ruleId] = Array.isArray(path) ? path.slice(0, 3) : [];
+    state.ruleGroups[scopeKey][ruleId] = normalizeGroupPath(scopeKey, Array.isArray(path) ? path.slice(0, 3) : []);
     saveState();
   }
 
@@ -346,6 +367,7 @@
     const panel = ensurePanel();
     const rules = getRules(activeScope);
     const ungrouped = rules.filter((rule) => getRulePath(activeScope, rule.id).length === 0);
+    const scopeGroupingEnabled = !!state.displayMode[activeScope];
 
     panel.innerHTML = `
       <div class="st-r3o-head">
@@ -356,7 +378,7 @@
         ${SCOPES.map((scope) => `<button type="button" class="st-r3o-scope-tab" data-r3o-action="scope" data-scope="${scope.key}" data-active="${scope.key === activeScope ? '1' : '0'}">${scope.label}</button>`).join('')}
       </div>
       <div class="st-r3o-tools">
-        <button type="button" class="menu_button interactable" data-r3o-action="toggle-display">开关分组</button>
+        <button type="button" class="menu_button interactable" data-r3o-action="toggle-display">${scopeGroupingEnabled ? '关闭当前分组' : '开启当前分组'}</button>
         <button type="button" class="menu_button interactable" data-r3o-action="expand-all">全部展开</button>
         <button type="button" class="menu_button interactable" data-r3o-action="collapse-all">全部收纳</button>
         <button type="button" class="menu_button interactable" data-r3o-action="add-root">新建一级组</button>
@@ -435,7 +457,7 @@
         renderPanel();
       }
       if (action === 'toggle-display') {
-        toggleGlobalDisplay();
+        toggleScopeDisplay(activeScope);
       }
       if (action === 'expand-all') {
         Object.keys(state.collapsed)
@@ -539,39 +561,23 @@
         rule.el.dataset.r3oL3 = l3;
       }
 
-      let order = 0;
-      const insertedL1 = new Set();
-      const insertedL2 = new Set();
-      const insertedL3 = new Set();
-
-      for (const rule of rules) {
+      const rulesByPath = new Map();
+      rules.forEach((rule) => {
         const path = getRulePath(scopeKey, rule.id);
-        const l1 = path[0] || '未分组';
-        const l2 = path[1] || '';
-        const l3 = path[2] || '';
-        const k1 = l1;
-        const k2 = `${l1}\u001f${l2}`;
-        const k3 = `${l1}\u001f${l2}\u001f${l3}`;
+        const key = path.join('\u001f');
+        const bucket = rulesByPath.get(key) || [];
+        bucket.push(rule);
+        rulesByPath.set(key, bucket);
+      });
 
-        if (!insertedL1.has(k1)) {
-          insertedL1.add(k1);
-          listEl.appendChild(createListHeader(scopeKey, [l1], 1));
-          listEl.lastElementChild.style.order = String(order++);
-        }
-        if (l2 && !insertedL2.has(k2)) {
-          insertedL2.add(k2);
-          listEl.appendChild(createListHeader(scopeKey, [l1, l2], 2));
-          listEl.lastElementChild.style.order = String(order++);
-        }
-        if (l3 && !insertedL3.has(k3)) {
-          insertedL3.add(k3);
-          listEl.appendChild(createListHeader(scopeKey, [l1, l2, l3], 3));
-          listEl.lastElementChild.style.order = String(order++);
-        }
-
-        rule.el.dataset.r3oPrevOrder = rule.el.style.order || '';
-        rule.el.style.order = String(order++);
+      const orderState = { value: 0 };
+      const ungroupedRules = rulesByPath.get('') || [];
+      if (ungroupedRules.length) {
+        appendListHeader(listEl, createListHeader(scopeKey, [], 0, `${ungroupedRules.length} 条`), orderState);
+        appendRules(listEl, ungroupedRules, orderState);
       }
+
+      appendGroupBranches(listEl, scopeKey, ensureScopeGroups(scopeKey), [], rulesByPath, orderState);
 
       applyListCollapse(scopeKey, listEl);
     } finally {
@@ -605,13 +611,53 @@
     listEl.classList.remove('st-r3o-grouping');
   }
 
-  function createListHeader(scopeKey, path, level) {
+  function appendListHeader(listEl, headerEl, orderState) {
+    listEl.appendChild(headerEl);
+    listEl.lastElementChild.style.order = String(orderState.value++);
+  }
+
+  function appendRules(listEl, rules, orderState) {
+    rules.forEach((rule) => {
+      rule.el.dataset.r3oPrevOrder = rule.el.style.order || '';
+      rule.el.style.order = String(orderState.value++);
+    });
+  }
+
+  function getBranchRuleCount(groups, parentPath, rulesByPath) {
+    let total = 0;
+    groups.forEach((group) => {
+      const path = parentPath.concat(group.name);
+      total += (rulesByPath.get(path.join('\u001f')) || []).length;
+      if (Array.isArray(group.children) && group.children.length) {
+        total += getBranchRuleCount(group.children, path, rulesByPath);
+      }
+    });
+    return total;
+  }
+
+  function appendGroupBranches(listEl, scopeKey, groups, parentPath, rulesByPath, orderState) {
+    groups.forEach((group) => {
+      const path = parentPath.concat(group.name);
+      const ownRules = rulesByPath.get(path.join('\u001f')) || [];
+      const childGroups = Array.isArray(group.children) ? group.children : [];
+      const totalCount = ownRules.length + getBranchRuleCount(childGroups, path, rulesByPath);
+
+      appendListHeader(listEl, createListHeader(scopeKey, path, path.length, `${totalCount} 条`), orderState);
+      appendRules(listEl, ownRules, orderState);
+      appendGroupBranches(listEl, scopeKey, childGroups, path, rulesByPath, orderState);
+    });
+  }
+
+  function createListHeader(scopeKey, path, level, metaText) {
     const el = document.createElement('div');
     const collapsed = isCollapsed(scopeKey, path);
     el.className = 'st-r3o-list-group-header';
     el.dataset.level = String(level);
     el.dataset.path = JSON.stringify(path);
-    el.innerHTML = `<span class="st-r3o-arrow">${collapsed ? '▶' : '▼'}</span><b>${escapeHtml(path[path.length - 1])}</b><span class="st-r3o-meta">L${level}</span>`;
+    const title = path.length ? path[path.length - 1] : '未分组';
+    const levelText = path.length ? `L${level}` : '默认';
+    const suffix = metaText ? `${levelText} · ${metaText}` : levelText;
+    el.innerHTML = `<span class="st-r3o-arrow">${collapsed ? '▶' : '▼'}</span><b>${escapeHtml(title)}</b><span class="st-r3o-meta">${escapeHtml(suffix)}</span>`;
     el.addEventListener('click', () => {
       toggleGroupCollapse(scopeKey, path);
     });
@@ -649,7 +695,7 @@
   function syncToolbarButtons() {
     const btn = q('[data-r3o-toggle="primary"]');
     if (!btn) return;
-    btn.textContent = '开关分组';
+    btn.textContent = isGlobalGroupingEnabled() ? '全部分组: 开' : '全部分组: 关';
   }
 
   function showPanel() {
@@ -661,6 +707,16 @@
   function toggleGlobalDisplay() {
     const next = !isGlobalGroupingEnabled();
     setAllDisplayModes(next);
+  }
+
+  function toggleScopeDisplay(scopeKey) {
+    state.displayMode[scopeKey] = !state.displayMode[scopeKey];
+    saveState();
+    applyGrouping(scopeKey);
+    syncToolbarButtons();
+    if (!q(`#${PANEL_ID}`)?.classList.contains('st-r3o-hidden')) {
+      renderPanel();
+    }
   }
 
   function ensureVersionRefresh() {

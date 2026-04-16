@@ -154,6 +154,17 @@
   user-select: none;
 }
 
+.st-r3o-list-group-header[data-level='0'] {
+  margin-top: 6px;
+  border-style: dashed;
+  opacity: 0.9;
+}
+
+.st-r3o-list-group-header[data-level='1'] {
+  margin-top: 8px;
+  background: color-mix(in srgb, var(--SmartThemeBlurTintColor, rgba(0, 0, 0, 0.15)) 75%, rgba(90, 150, 255, 0.14));
+}
+
 .st-r3o-list-group-header:hover {
   filter: brightness(1.05);
 }

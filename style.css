@@ -80,6 +80,24 @@
   margin-bottom: 10px;
 }
 
+.st-r3o-picker {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px;
+  margin-bottom: 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(128, 175, 255, 0.35);
+  background: rgba(90, 150, 255, 0.1);
+}
+
+.st-r3o-picker-idle {
+  border-style: dashed;
+  opacity: 0.82;
+}
+
 .st-r3o-scope-tabs {
   display: flex;
   gap: 6px;
@@ -118,6 +136,11 @@
 .st-r3o-rule {
   background: transparent;
   border: 1px dashed rgba(255, 255, 255, 0.08);
+}
+
+.st-r3o-rule-selected {
+  border-color: rgba(128, 175, 255, 0.7);
+  background: rgba(90, 150, 255, 0.12);
 }
 
 .st-r3o-rule.st-r3o-dragging {

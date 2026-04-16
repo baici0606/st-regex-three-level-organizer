@@ -2,7 +2,7 @@
   'use strict';
 
   const MODULE = 'st-regex-three-level-organizer';
-  const VERSION = '0.1.6';
+  const VERSION = '0.1.7';
   const PANEL_ID = 'st-r3o-panel';
   const CHOOSER_ID = 'st-r3o-scope-chooser';
   const STORE_GROUPS = `${MODULE}:groups`;
@@ -47,6 +47,7 @@
   let activeScope = 'global';
   let isApplyingGrouping = false;
   let startTimer = null;
+  let selectedRuleId = '';
 
   function uid(prefix) {
     return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -109,6 +110,13 @@
 
   function isGlobalGroupingEnabled() {
     return SCOPES.every((scope) => !!state.displayMode[scope.key]);
+  }
+
+  function getDisplayModeSummary() {
+    const enabledCount = SCOPES.filter((scope) => !!state.displayMode[scope.key]).length;
+    if (enabledCount === 0) return '关';
+    if (enabledCount === SCOPES.length) return '开';
+    return '部分开';
   }
 
   function getScopeConfig(scopeKey) {
@@ -384,6 +392,8 @@
     const rules = getRules(activeScope);
     const ungrouped = rules.filter((rule) => getRulePath(activeScope, rule.id).length === 0);
     const scopeGroupingEnabled = !!state.displayMode[activeScope];
+    const selectedRule = rules.find((rule) => rule.id === selectedRuleId) || null;
+    const selectedRuleName = selectedRule?.name || '';
 
     panel.innerHTML = `
       <div class="st-r3o-head">
@@ -400,9 +410,14 @@
         <button type="button" class="menu_button interactable" data-r3o-action="add-root">新建一级组</button>
         <button type="button" class="menu_button interactable" data-r3o-action="scan">刷新规则列表</button>
       </div>
+      <div class="st-r3o-picker ${selectedRule ? '' : 'st-r3o-picker-idle'}">
+        <b>${selectedRule ? `已选规则: ${escapeHtml(selectedRuleName)}` : '手机模式: 先点规则，再点“放入此组”'}</b>
+        <button type="button" class="menu_button interactable" data-r3o-action="clear-selection" ${selectedRule ? '' : 'disabled'}>取消选择</button>
+      </div>
       <div class="st-r3o-dropzone" data-r3o-drop="[]">
         <b>未分组</b>
-        <span class="st-r3o-meta">${ungrouped.length} 条，可拖回这里</span>
+        <span class="st-r3o-meta">${ungrouped.length} 条，可拖回这里或点此放入</span>
+        <button type="button" class="menu_button interactable" data-r3o-action="assign-here" data-path="[]" ${selectedRule ? '' : 'disabled'}>放到未分组</button>
       </div>
       ${ungrouped.map((rule) => renderRuleRow(rule, 1)).join('')}
       ${renderGroups(activeScope, ensureScopeGroups(activeScope), [], 0)}
@@ -424,6 +439,7 @@
             <button type="button" class="menu_button interactable" data-r3o-action="toggle-group" data-path='${escapeAttr(JSON.stringify(path))}'>${collapsed ? '+' : '-'}</button>
             <b>${escapeHtml(group.name)}</b>
             <span class="st-r3o-level">L${path.length}</span>
+            <button type="button" class="menu_button interactable" data-r3o-action="assign-here" data-path='${escapeAttr(JSON.stringify(path))}' ${selectedRuleId ? '' : 'disabled'}>放入此组</button>
             <button type="button" class="menu_button interactable" data-r3o-action="add-child" data-path='${escapeAttr(JSON.stringify(path))}'>+子组</button>
             <button type="button" class="menu_button interactable" data-r3o-action="rename-group" data-path='${escapeAttr(JSON.stringify(path))}'>改名</button>
             <button type="button" class="menu_button interactable" data-r3o-action="delete-group" data-path='${escapeAttr(JSON.stringify(path))}'>删组</button>
@@ -437,12 +453,22 @@
 
   function renderRuleRow(rule, depth) {
     const path = getRulePath(activeScope, rule.id);
+    const selected = rule.id === selectedRuleId;
     return `
-      <div class="st-r3o-rule" draggable="true" data-r3o-rule-id="${escapeHtml(rule.id)}" style="margin-left:${depth * 14}px">
+      <div class="st-r3o-rule ${selected ? 'st-r3o-rule-selected' : ''}" draggable="true" data-r3o-rule-id="${escapeHtml(rule.id)}" data-r3o-action="pick-rule" style="margin-left:${depth * 14}px">
         <span>${escapeHtml(rule.name)}</span>
         <span class="st-r3o-meta">${escapeHtml(path.length ? path.join(' / ') : '未分组')}</span>
+        <button type="button" class="menu_button interactable" data-r3o-action="pick-rule" data-rule-id="${escapeHtml(rule.id)}">${selected ? '已选中' : '选择'}</button>
       </div>
     `;
+  }
+
+  function assignRuleToPath(ruleId, path) {
+    if (!ruleId) return;
+    setRulePath(activeScope, ruleId, path);
+    selectedRuleId = '';
+    renderPanel();
+    applyGrouping(activeScope);
   }
 
   function escapeHtml(value) {
@@ -466,10 +492,12 @@
       if (!target) return;
       const action = target.dataset.r3oAction;
       const path = parsePath(target.dataset.path);
+      const ruleId = target.dataset.ruleId || target.closest('[data-r3o-rule-id]')?.dataset.r3oRuleId || '';
 
       if (action === 'close') panel.classList.add('st-r3o-hidden');
       if (action === 'scope') {
         activeScope = target.dataset.scope || 'global';
+        selectedRuleId = '';
         renderPanel();
       }
       if (action === 'toggle-display') {
@@ -493,6 +521,17 @@
       }
       if (action === 'add-root') addGroup(activeScope, []);
       if (action === 'scan') renderPanel();
+      if (action === 'clear-selection') {
+        selectedRuleId = '';
+        renderPanel();
+      }
+      if (action === 'pick-rule' && ruleId) {
+        selectedRuleId = selectedRuleId === ruleId ? '' : ruleId;
+        renderPanel();
+      }
+      if (action === 'assign-here' && selectedRuleId) {
+        assignRuleToPath(selectedRuleId, path);
+      }
       if (action === 'add-child') addGroup(activeScope, path);
       if (action === 'rename-group') renameGroup(activeScope, path);
       if (action === 'delete-group') deleteGroup(activeScope, path);
@@ -519,9 +558,7 @@
         event.preventDefault();
         el.classList.remove('st-r3o-over');
         const ruleId = event.dataTransfer.getData('text/plain');
-        setRulePath(activeScope, ruleId, parsePath(el.dataset.r3oDrop));
-        renderPanel();
-        applyGrouping(activeScope);
+        assignRuleToPath(ruleId, parsePath(el.dataset.r3oDrop));
       };
     });
   }
@@ -711,7 +748,7 @@
   function syncToolbarButtons() {
     const btn = q('[data-r3o-toggle="primary"]');
     if (!btn) return;
-    btn.textContent = isGlobalGroupingEnabled() ? '全部分组: 开' : '全部分组: 关';
+    btn.textContent = `全部分组: ${getDisplayModeSummary()}`;
   }
 
   function showPanel() {

@@ -2,7 +2,7 @@
   'use strict';
 
   const MODULE = 'st-regex-three-level-organizer';
-  const VERSION = '0.1.2';
+  const VERSION = '0.1.3';
   const PANEL_ID = 'st-r3o-panel';
   const CHOOSER_ID = 'st-r3o-scope-chooser';
   const STORE_GROUPS = `${MODULE}:groups`;
@@ -85,6 +85,22 @@
     saveJson(STORE_MODE, state.displayMode);
   }
 
+  function setAllDisplayModes(enabled) {
+    SCOPES.forEach((scope) => {
+      state.displayMode[scope.key] = enabled;
+    });
+    saveState();
+    SCOPES.forEach((scope) => applyGrouping(scope.key));
+    syncToolbarButtons();
+    if (!q(`#${PANEL_ID}`)?.classList.contains('st-r3o-hidden')) {
+      renderPanel();
+    }
+  }
+
+  function isGlobalGroupingEnabled() {
+    return SCOPES.every((scope) => !!state.displayMode[scope.key]);
+  }
+
   function getScopeConfig(scopeKey) {
     return SCOPES.find((scope) => scope.key === scopeKey) || SCOPES[0];
   }
@@ -131,6 +147,13 @@
     const close = () => {
       chooser.classList.add('st-r3o-hidden');
       chooser.onclick = null;
+    };
+
+    chooser.onpointerdown = (event) => {
+      event.stopPropagation();
+    };
+    chooser.onmousedown = (event) => {
+      event.stopPropagation();
     };
 
     chooser.onclick = (event) => {
@@ -340,7 +363,7 @@
         ${SCOPES.map((scope) => `<button type="button" class="st-r3o-scope-tab" data-r3o-action="scope" data-scope="${scope.key}" data-active="${scope.key === activeScope ? '1' : '0'}">${scope.label}</button>`).join('')}
       </div>
       <div class="st-r3o-tools">
-        <button type="button" class="menu_button interactable" data-r3o-action="toggle-display">${state.displayMode[activeScope] ? '关闭列表分组' : '开启列表分组'}</button>
+        <button type="button" class="menu_button interactable" data-r3o-action="toggle-display">开关分组</button>
         <button type="button" class="menu_button interactable" data-r3o-action="expand-all">全部展开</button>
         <button type="button" class="menu_button interactable" data-r3o-action="collapse-all">全部收纳</button>
         <button type="button" class="menu_button interactable" data-r3o-action="add-root">新建一级组</button>
@@ -405,7 +428,15 @@
   }
 
   function bindPanelEvents(panel) {
+    panel.onpointerdown = (event) => {
+      event.stopPropagation();
+    };
+    panel.onmousedown = (event) => {
+      event.stopPropagation();
+    };
     panel.onclick = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
       const target = event.target.closest('[data-r3o-action]');
       if (!target) return;
       const action = target.dataset.r3oAction;
@@ -417,7 +448,7 @@
         renderPanel();
       }
       if (action === 'toggle-display') {
-        toggleDisplayForScope(activeScope);
+        toggleGlobalDisplay();
       }
       if (action === 'expand-all') {
         Object.keys(state.collapsed)
@@ -631,8 +662,7 @@
   function syncToolbarButtons() {
     const btn = q('[data-r3o-toggle="primary"]');
     if (!btn) return;
-    const enabled = SCOPES.filter((scope) => state.displayMode[scope.key]).map((scope) => scope.label);
-    btn.textContent = enabled.length ? `分组中(${enabled.length})` : '开启/关闭分组';
+    btn.textContent = '开关分组';
   }
 
   function showPanel() {
@@ -641,15 +671,9 @@
     renderPanel();
   }
 
-  function toggleDisplayForScope(scopeKey) {
-    state.displayMode[scopeKey] = !state.displayMode[scopeKey];
-    saveState();
-    applyGrouping(scopeKey);
-    syncToolbarButtons();
-    if (activeScope === scopeKey && !q(`#${PANEL_ID}`)?.classList.contains('st-r3o-hidden')) {
-      renderPanel();
-    }
-    alert(`${getScopeConfig(scopeKey).label}已${state.displayMode[scopeKey] ? '开启' : '关闭'}分组显示`);
+  function toggleGlobalDisplay() {
+    const next = !isGlobalGroupingEnabled();
+    setAllDisplayModes(next);
   }
 
   function ensureVersionRefresh() {
@@ -706,19 +730,19 @@
     const toggleBtn = document.createElement('button');
     toggleBtn.type = 'button';
     toggleBtn.className = 'menu_button interactable';
-    toggleBtn.textContent = '开启/关闭分组';
+    toggleBtn.textContent = '开关分组';
     toggleBtn.dataset.r3oToggle = 'primary';
     toggleBtn.onclick = (event) => {
       event.preventDefault();
       event.stopPropagation();
-      chooseScopeWithButtons(event.currentTarget, (scopeKey) => {
-        activeScope = scopeKey;
-        toggleDisplayForScope(scopeKey);
-      });
+      toggleGlobalDisplay();
     };
 
     row.append(addGroupBtn, organizerBtn, toggleBtn);
     wrap.appendChild(row);
+    wrap.addEventListener('pointerdown', (event) => { event.stopPropagation(); }, true);
+    wrap.addEventListener('mousedown', (event) => { event.stopPropagation(); }, true);
+    wrap.addEventListener('click', (event) => { event.stopPropagation(); }, true);
     host.insertAdjacentElement('afterend', wrap);
     return wrap;
   }

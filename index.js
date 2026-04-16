@@ -134,6 +134,8 @@
     };
 
     chooser.onclick = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
       const scopeBtn = event.target.closest('[data-r3o-choose-scope]');
       const cancelBtn = event.target.closest('[data-r3o-choose-cancel]');
       if (cancelBtn) {
@@ -236,27 +238,37 @@
     const level = parentPath.length + 1;
     if (level > 3) {
       alert('最多支持三级组');
-      return;
+      return false;
     }
     const name = prompt(`新增 ${level} 级组名称`);
-    if (!name) return;
+    if (!name) return false;
 
-    const group = { id: uid('g'), name: name.trim(), children: [] };
+    const groupName = name.trim();
+    if (!groupName) return false;
+
+    const group = { id: uid('g'), name: groupName, children: [] };
     if (!parentPath.length) {
       const root = ensureScopeGroups(scopeKey);
-      if (root.some((item) => item.name === group.name)) return alert('同级组名已存在');
+      if (root.some((item) => item.name === group.name)) {
+        alert('同级组名已存在');
+        return false;
+      }
       root.push(group);
     } else {
       const parent = findGroup(parentPath, scopeKey);
-      if (!parent) return;
+      if (!parent) return false;
       parent.children = Array.isArray(parent.children) ? parent.children : [];
-      if (parent.children.some((item) => item.name === group.name)) return alert('同级组名已存在');
+      if (parent.children.some((item) => item.name === group.name)) {
+        alert('同级组名已存在');
+        return false;
+      }
       parent.children.push(group);
     }
 
     saveState();
     renderPanel();
     applyGrouping(scopeKey);
+    return true;
   }
 
   function renameGroup(scopeKey, path) {
@@ -669,10 +681,12 @@
     addGroupBtn.className = 'menu_button interactable';
     addGroupBtn.textContent = '新建分组';
     addGroupBtn.onclick = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
       chooseScopeWithButtons(event.currentTarget, (scopeKey) => {
         activeScope = scopeKey;
-        showPanel();
-        addGroup(scopeKey, []);
+        const created = addGroup(scopeKey, []);
+        if (created) showPanel();
       });
     };
 
@@ -681,6 +695,8 @@
     organizerBtn.className = 'menu_button interactable';
     organizerBtn.textContent = '分组整理';
     organizerBtn.onclick = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
       chooseScopeWithButtons(event.currentTarget, (scopeKey) => {
         activeScope = scopeKey;
         showPanel();
@@ -693,6 +709,8 @@
     toggleBtn.textContent = '开启/关闭分组';
     toggleBtn.dataset.r3oToggle = 'primary';
     toggleBtn.onclick = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
       chooseScopeWithButtons(event.currentTarget, (scopeKey) => {
         activeScope = scopeKey;
         toggleDisplayForScope(scopeKey);

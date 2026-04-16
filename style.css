@@ -49,8 +49,16 @@
 .st-r3o-scope-chooser-buttons,
 .st-r3o-scope-chooser-actions {
   display: flex;
+  flex-direction: row;
   gap: 6px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  align-items: center;
+}
+
+.st-r3o-scope-chooser-buttons .menu_button,
+.st-r3o-scope-chooser-actions .menu_button {
+  writing-mode: horizontal-tb;
+  white-space: nowrap;
 }
 
 .st-r3o-scope-chooser-actions {

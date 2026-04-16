@@ -5,6 +5,6 @@
   "js": "index.js",
   "css": "style.css",
   "author": "Kilo",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Add regex grouping for SillyTavern lists with three-level folders, collapsible headers, and drag-to-group organization."
 }

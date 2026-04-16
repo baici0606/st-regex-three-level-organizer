@@ -2,7 +2,7 @@
   'use strict';
 
   const MODULE = 'st-regex-three-level-organizer';
-  const VERSION = '0.1.5';
+  const VERSION = '0.1.6';
   const PANEL_ID = 'st-r3o-panel';
   const CHOOSER_ID = 'st-r3o-scope-chooser';
   const STORE_GROUPS = `${MODULE}:groups`;
@@ -91,6 +91,16 @@
     });
     saveState();
     SCOPES.forEach((scope) => applyGrouping(scope.key));
+    syncToolbarButtons();
+    if (!q(`#${PANEL_ID}`)?.classList.contains('st-r3o-hidden')) {
+      renderPanel();
+    }
+  }
+
+  function setScopeDisplayMode(scopeKey, enabled) {
+    state.displayMode[scopeKey] = !!enabled;
+    saveState();
+    applyGrouping(scopeKey);
     syncToolbarButtons();
     if (!q(`#${PANEL_ID}`)?.classList.contains('st-r3o-hidden')) {
       renderPanel();
@@ -302,9 +312,15 @@
       parent.children.push(group);
     }
 
+    state.collapsed[`${scopeKey}:${parentPath.concat(group.name).join('/')}`] = false;
     saveState();
+    if (!state.displayMode[scopeKey]) {
+      state.displayMode[scopeKey] = true;
+      saveState();
+    }
     renderPanel();
     applyGrouping(scopeKey);
+    syncToolbarButtons();
     return true;
   }
 
@@ -710,13 +726,7 @@
   }
 
   function toggleScopeDisplay(scopeKey) {
-    state.displayMode[scopeKey] = !state.displayMode[scopeKey];
-    saveState();
-    applyGrouping(scopeKey);
-    syncToolbarButtons();
-    if (!q(`#${PANEL_ID}`)?.classList.contains('st-r3o-hidden')) {
-      renderPanel();
-    }
+    setScopeDisplayMode(scopeKey, !state.displayMode[scopeKey]);
   }
 
   function ensureVersionRefresh() {

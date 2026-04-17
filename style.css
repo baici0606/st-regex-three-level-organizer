@@ -112,16 +112,16 @@
 .st-rmg-folder-handle {
   flex: 0 0 auto;
   color: rgba(220, 228, 245, 0.58);
-  font-size: 15px;
+  font-size: 17px;
   letter-spacing: -1px;
   cursor: grab;
   user-select: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 18px;
-  min-height: 22px;
-  padding-right: 4px;
+  min-width: 26px;
+  min-height: 28px;
+  padding-right: 6px;
 }
 
 .st-rmg-group-name {
@@ -214,6 +214,10 @@
 .st-rmg-folder-item-disabled {
   opacity: 0.72;
   filter: brightness(0.72);
+}
+
+.st-rmg-folder-item-locked {
+  pointer-events: none;
 }
 
 .st-rmg-danger {

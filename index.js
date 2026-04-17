@@ -788,6 +788,7 @@
         const groupId = store.assignments[item.id] || UNGROUPED_ID;
         const isFolderDisabled = !!store.disabledFolders?.[groupId];
         item.el.classList.toggle('st-rmg-folder-item-disabled', isFolderDisabled);
+        item.el.classList.toggle('st-rmg-folder-item-locked', isFolderDisabled);
         const disableCheckbox = item.el.querySelector?.('.disable_regex');
         if (disableCheckbox instanceof HTMLElement) {
           disableCheckbox.disabled = isFolderDisabled;

@@ -411,6 +411,13 @@
       const selectEl = containerEl.querySelector(`#${GROUP_SELECT_ID}`);
       populateGroupSelect(selectEl);
 
+      updateGroupActionState(containerEl);
+    }
+
+    function updateGroupActionState(containerEl) {
+      if (!containerEl) return;
+
+      const selectEl = containerEl.querySelector(`#${GROUP_SELECT_ID}`);
       const selectedGroupId = String(selectEl?.value || UNGROUPED_ID);
       const canEditGroup = selectedGroupId !== UNGROUPED_ID && getGroups().some((group) => group.id === selectedGroupId);
       const renameBtn = containerEl.querySelector(`#${RENAME_GROUP_ID}`);
@@ -767,7 +774,7 @@
 
       headerEl.addEventListener('change', (e) => {
         if (e.target?.matches?.(`#${GROUP_SELECT_ID}`)) {
-          renderGroupManager(headerEl.querySelector('.st-rmg-group-manager'));
+          updateGroupActionState(headerEl.querySelector('.st-rmg-group-manager'));
         }
       });
 

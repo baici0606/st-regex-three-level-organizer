@@ -63,7 +63,7 @@
 
 .st-rmg-group-actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 4px;
   align-items: center;
 }
@@ -133,8 +133,7 @@
     align-items: stretch;
   }
 
-  .st-rmg-group-actions {
-    flex-direction: column;
-    align-items: stretch;
+  .st-rmg-group-actions > * {
+    flex: 1 1 0;
   }
 }

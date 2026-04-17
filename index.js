@@ -288,15 +288,36 @@
       selectedItemIds = new Set(Array.from(selectedItemIds).filter((itemId) => validIds.has(itemId)));
     }
 
-    function buildGroupOptions(byId) {
-      const groups = store.groups.slice().sort((a, b) => a.order - b.order || a.name.localeCompare(b.name, 'zh-Hans-CN'));
-      return ['<option value="__ungrouped__">未分组</option>']
-        .concat(groups.map((group) => {
-          const depth = Math.max(1, getNodeDepth(group.id, byId));
-          const prefix = '&nbsp;'.repeat((depth - 1) * 4);
-          return `<option value="${escapeHtml(group.id)}">${prefix}${escapeHtml(getFullPath(group.id, byId))}</option>`;
-        }))
-        .join('');
+    function populateGroupSelect(selectEl, roots, byId) {
+      if (!selectEl) return;
+
+      const previousValue = selectEl.value;
+      selectEl.innerHTML = '';
+
+      const ungroupedOption = document.createElement('option');
+      ungroupedOption.value = UNGROUPED_ID;
+      ungroupedOption.textContent = '未分组';
+      selectEl.appendChild(ungroupedOption);
+
+      function appendNodeOption(node, depth) {
+        const optionEl = document.createElement('option');
+        optionEl.value = node.id;
+        optionEl.textContent = `${' '.repeat(Math.max(0, depth - 1) * 4)}${getFullPath(node.id, byId)}`;
+        selectEl.appendChild(optionEl);
+
+        for (const child of node.children) {
+          appendNodeOption(child, depth + 1);
+        }
+      }
+
+      for (const root of roots) {
+        appendNodeOption(root, 1);
+      }
+
+      const nextValue = Array.from(selectEl.options).some((option) => option.value === previousValue)
+        ? previousValue
+        : UNGROUPED_ID;
+      selectEl.value = nextValue;
     }
 
     function updateSelectedCount() {
@@ -400,9 +421,7 @@
         }
 
         const selectEl = headerEl.querySelector(`#${SELECT_ID}`);
-        if (selectEl) {
-          selectEl.innerHTML = buildGroupOptions(byId);
-        }
+        populateGroupSelect(selectEl, roots, byId);
 
         syncSelectionUI(items);
         updateSelectedCount();

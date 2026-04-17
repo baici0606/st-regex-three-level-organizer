@@ -534,7 +534,7 @@
       const selected = getSelectedItemIds();
       if (selected.length < 1) {
         toast('请先勾选要分组的正则', 'warning');
-        return;
+        return false;
       }
 
       for (const itemId of selected) {
@@ -542,9 +542,11 @@
         else store.assignments[itemId] = targetGroupId;
       }
 
+      toast(targetGroupId === UNGROUPED_ID ? '已移动到未分组' : '已移动到目标分组');
       selectedItemIds.clear();
       saveStore();
       renderTree();
+      return true;
     }
 
     function bindHeaderEvents(headerEl) {
@@ -575,6 +577,15 @@
         e.stopPropagation();
         const selectEl = headerEl.querySelector(`#${SELECT_ID}`);
         assignSelected(selectEl?.value || UNGROUPED_ID);
+      });
+
+      headerEl.querySelector(`#${SELECT_ID}`)?.addEventListener('change', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        const targetGroupId = String(e.target?.value || UNGROUPED_ID);
+        const moved = assignSelected(targetGroupId);
+        if (!moved) return;
       });
 
       headerEl.querySelector(`#${UNGROUP_ID}`)?.addEventListener('click', (e) => {

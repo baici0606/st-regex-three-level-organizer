@@ -410,6 +410,7 @@
       if (currentChatId) {
         await ctx?.reloadCurrentChat?.();
       }
+      await new Promise((resolve) => schedule(resolve));
     }
 
     function getFolderItemIds(groupId, items = collectItems()) {
@@ -1108,6 +1109,9 @@
         const folderDisableChanged = await syncFolderDisableState(items);
         if (folderDisableChanged) {
           await reloadRegexUi();
+          schedule(() => {
+            renderTree();
+          });
           return;
         }
 

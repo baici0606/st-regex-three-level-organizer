@@ -323,6 +323,7 @@
     let lastFolderDragEndedAt = 0;
     let lastRenderedGroupSignature = '';
     let selectedGroupId = UNGROUPED_ID;
+    let pendingViewportRestore = null;
     let panelCollapsed = !!loadJson(PANEL_COLLAPSED_KEY, false);
 
     function pauseListObserver() {
@@ -448,7 +449,7 @@
       const itemIds = new Set(getFolderItemIds(groupId));
       if (itemIds.size < 1) return;
 
-      const viewportState = captureViewportState(getHeaderEl());
+      pendingViewportRestore = captureViewportState(getHeaderEl());
 
       if (!store.disabledFolders || typeof store.disabledFolders !== 'object') {
         store.disabledFolders = {};
@@ -465,9 +466,6 @@
 
       saveStore();
       await renderTree();
-      schedule(() => {
-        restoreViewportState(viewportState);
-      });
     }
 
     async function syncFolderDisableOverlay(items) {
@@ -1162,6 +1160,13 @@
       } finally {
         rendering = false;
         startListObserver(listEl);
+        if (pendingViewportRestore) {
+          const restoreState = pendingViewportRestore;
+          pendingViewportRestore = null;
+          schedule(() => {
+            restoreViewportState(restoreState);
+          });
+        }
       }
     }
 
@@ -1223,6 +1228,7 @@
         if (toggleBtn) {
           e.preventDefault();
           e.stopPropagation();
+          toggleBtn.blur?.();
           const groupId = String(toggleBtn.dataset.folderToggle || UNGROUPED_ID);
           const enabled = toggleBtn.classList.contains('is-off');
           void setFolderEnabled(groupId, enabled);

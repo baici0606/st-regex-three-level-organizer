@@ -398,6 +398,7 @@
       }
 
       function pushItem(item, hidden) {
+        item.el.dataset.stRmgItemId = item.id;
         item.el.classList.toggle(HIDDEN_CLASS, hidden);
         item.el.style.order = String(order++);
       }
@@ -477,6 +478,23 @@
       saveStore();
       renderTree();
       return true;
+    }
+
+    function assignItemToGroup(itemId, targetGroupId) {
+      if (!itemId) return false;
+      if (!targetGroupId || targetGroupId === UNGROUPED_ID) delete store.assignments[itemId];
+      else store.assignments[itemId] = targetGroupId;
+
+      saveStore();
+      renderTree();
+      return true;
+    }
+
+    function clearDropTargets(listEl = getListEl()) {
+      if (!listEl) return;
+      for (const headerEl of listEl.querySelectorAll('.st-rmg-group-header.st-rmg-drop-target')) {
+        headerEl.classList.remove('st-rmg-drop-target');
+      }
     }
 
     function renderTree() {
@@ -583,6 +601,92 @@
         saveStore();
         renderTree();
       });
+
+      listEl.addEventListener(
+        'dragstart',
+        (e) => {
+          const itemEl = e.target?.closest?.('.regex-script-label');
+          const itemId = String(itemEl?.dataset?.stRmgItemId || '');
+          if (!itemId) return;
+          dragItemId = itemId;
+          try {
+            e.dataTransfer?.setData?.('text/plain', itemId);
+            e.dataTransfer.effectAllowed = 'move';
+          } catch {
+            // ignore
+          }
+        },
+        true
+      );
+
+      listEl.addEventListener(
+        'dragend',
+        () => {
+          dragItemId = '';
+          clearDropTargets(listEl);
+        },
+        true
+      );
+
+      listEl.addEventListener(
+        'dragenter',
+        (e) => {
+          const headerEl = e.target?.closest?.('.st-rmg-group-header');
+          if (!headerEl || !dragItemId) return;
+          clearDropTargets(listEl);
+          headerEl.classList.add('st-rmg-drop-target');
+        },
+        true
+      );
+
+      listEl.addEventListener(
+        'dragover',
+        (e) => {
+          const headerEl = e.target?.closest?.('.st-rmg-group-header');
+          if (!headerEl || !dragItemId) return;
+          e.preventDefault();
+          try {
+            e.dataTransfer.dropEffect = 'move';
+          } catch {
+            // ignore
+          }
+          clearDropTargets(listEl);
+          headerEl.classList.add('st-rmg-drop-target');
+        },
+        true
+      );
+
+      listEl.addEventListener(
+        'dragleave',
+        (e) => {
+          const headerEl = e.target?.closest?.('.st-rmg-group-header');
+          if (!headerEl) return;
+          const related = e.relatedTarget;
+          if (related && headerEl.contains(related)) return;
+          headerEl.classList.remove('st-rmg-drop-target');
+        },
+        true
+      );
+
+      listEl.addEventListener(
+        'drop',
+        (e) => {
+          const headerEl = e.target?.closest?.('.st-rmg-group-header');
+          if (!headerEl) return;
+
+          const itemId = dragItemId || String(e.dataTransfer?.getData?.('text/plain') || '');
+          if (!itemId) return;
+
+          e.preventDefault();
+          e.stopPropagation();
+
+          const targetGroupId = String(headerEl.dataset.groupId || UNGROUPED_ID);
+          clearDropTargets(listEl);
+          dragItemId = '';
+          assignItemToGroup(itemId, targetGroupId);
+        },
+        true
+      );
     }
 
     function startListObserver(listEl) {

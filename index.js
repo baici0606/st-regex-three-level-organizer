@@ -170,14 +170,13 @@
     const SCRIPT_LIST_ID = `${MODULE_NAME}-${scope}-script-list`;
     const NEW_GROUP_ID = `${MODULE_NAME}-${scope}-new-group`;
     const MOVE_ID = `${MODULE_NAME}-${scope}-move`;
-    const UNGROUP_ID = `${MODULE_NAME}-${scope}-ungroup`;
-    const REFRESH_ID = `${MODULE_NAME}-${scope}-refresh`;
 
     let store = sanitizeStore(loadJson(STORAGE_KEY, createDefaultStore()));
     let listObserver = null;
     let domObserver = null;
     let rendering = false;
     let selectedItemIds = new Set();
+    let lastRenderedGroupSignature = '';
 
     function saveStore() {
       store = sanitizeStore(store);
@@ -247,10 +246,28 @@
       if (badge) badge.textContent = `已选 ${selectedItemIds.size}`;
     }
 
+    function getGroupSignature() {
+      return JSON.stringify(
+        getGroups().map((group) => ({
+          id: group.id,
+          name: group.name,
+          order: group.order
+        }))
+      );
+    }
+
     function populateGroupSelect(selectEl) {
       if (!selectEl) return;
 
-      const previousValue = selectEl.value;
+      const nextSignature = getGroupSignature();
+      const previousValue = selectEl.value || UNGROUPED_ID;
+
+      if (lastRenderedGroupSignature === nextSignature && selectEl.options.length > 0) {
+        const stillExists = Array.from(selectEl.options).some((option) => option.value === previousValue);
+        if (!stillExists) selectEl.value = UNGROUPED_ID;
+        return;
+      }
+
       const groups = getGroups();
       selectEl.innerHTML = '';
 
@@ -270,6 +287,7 @@
         ? previousValue
         : UNGROUPED_ID;
       selectEl.value = nextValue;
+      lastRenderedGroupSignature = nextSignature;
     }
 
     function renderGroupManager(containerEl) {
@@ -282,8 +300,12 @@
               (group) => `
                 <div class="st-rmg-group-chip">
                   <span class="st-rmg-group-chip-name">${escapeHtml(group.name)}</span>
-                  <button type="button" class="menu_button interactable st-rmg-chip-btn" data-group-rename="${escapeHtml(group.id)}" title="重命名分组">改名</button>
-                  <button type="button" class="menu_button interactable st-rmg-chip-btn st-rmg-danger" data-group-delete="${escapeHtml(group.id)}" title="删除分组">删</button>
+                  <button type="button" class="menu_button interactable st-rmg-chip-btn" data-group-rename="${escapeHtml(group.id)}" title="重命名分组" aria-label="重命名分组">
+                    <span class="fa-solid fa-pen-to-square" aria-hidden="true"></span>
+                  </button>
+                  <button type="button" class="menu_button interactable st-rmg-chip-btn st-rmg-danger" data-group-delete="${escapeHtml(group.id)}" title="删除分组" aria-label="删除分组">
+                    <span class="fa-solid fa-trash" aria-hidden="true"></span>
+                  </button>
                 </div>
               `
             )
@@ -377,6 +399,7 @@
         name,
         order: store.groups.length + 1
       });
+      lastRenderedGroupSignature = '';
       saveStore();
       renderTree();
     }
@@ -389,6 +412,7 @@
       if (!nextName) return;
 
       group.name = nextName;
+      lastRenderedGroupSignature = '';
       saveStore();
       renderTree();
     }
@@ -405,6 +429,7 @@
         if (assignedGroupId === groupId) delete store.assignments[itemId];
       }
       delete store.collapsed[groupId];
+      lastRenderedGroupSignature = '';
       saveStore();
       renderTree();
     }
@@ -485,22 +510,6 @@
           return;
         }
 
-        const ungroupBtn = e.target?.closest?.(`#${UNGROUP_ID}`);
-        if (ungroupBtn) {
-          e.preventDefault();
-          e.stopPropagation();
-          assignSelected(UNGROUPED_ID);
-          return;
-        }
-
-        const refreshBtn = e.target?.closest?.(`#${REFRESH_ID}`);
-        if (refreshBtn) {
-          e.preventDefault();
-          e.stopPropagation();
-          renderTree();
-          return;
-        }
-
         const renameBtn = e.target?.closest?.('[data-group-rename]');
         if (renameBtn) {
           e.preventDefault();
@@ -572,8 +581,6 @@
             <button type="button" class="menu_button interactable" id="${NEW_GROUP_ID}">新增分组</button>
             <select id="${GROUP_SELECT_ID}" class="text_pole st-rmg-select"></select>
             <button type="button" class="menu_button interactable" id="${MOVE_ID}">移动到组</button>
-            <button type="button" class="menu_button interactable" id="${UNGROUP_ID}">移到未分组</button>
-            <button type="button" class="menu_button interactable" id="${REFRESH_ID}">刷新</button>
           </div>
           <div class="st-rmg-group-manager"></div>
           <div class="st-rmg-script-list" id="${SCRIPT_LIST_ID}"></div>

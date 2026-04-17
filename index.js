@@ -74,6 +74,12 @@
     return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   }
 
+  function keySegment(value, fallback = 'default') {
+    const normalized = String(value ?? '').trim();
+    if (!normalized) return fallback;
+    return normalized.replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 120) || fallback;
+  }
+
   function getScriptName(itemEl) {
     const nameEl = itemEl?.querySelector?.('.regex_script_name');
     return nameEl?.textContent?.trim() || nameEl?.getAttribute?.('title')?.trim() || '';
@@ -216,8 +222,25 @@
     });
   }
 
+  function getScopeContextKey(scope) {
+    const ctx = getCtx();
+
+    if (scope === 'preset') {
+      const apiId = window.getCurrentPresetAPI?.() ?? ctx?.getCurrentPresetAPI?.() ?? 'no-api';
+      const presetName = window.getCurrentPresetName?.() ?? ctx?.getCurrentPresetName?.() ?? 'no-preset';
+      return `preset:${keySegment(apiId, 'no-api')}:${keySegment(presetName, 'no-preset')}`;
+    }
+
+    if (scope === 'scoped') {
+      const characterId = ctx?.characterId;
+      const avatar = ctx?.characters?.[characterId]?.avatar;
+      return `scoped:${keySegment(avatar, 'no-character')}`;
+    }
+
+    return 'global';
+  }
+
   function createPanelController({ scope, blockId, listId, titleText }) {
-    const STORAGE_KEY = `${MODULE_NAME}:${scope}:store`;
     const HEADER_ID = `${MODULE_NAME}-${scope}-header`;
     const PANEL_COLLAPSED_KEY = `${MODULE_NAME}:${scope}:panel-collapsed`;
     const GROUP_SELECT_ID = `${MODULE_NAME}-${scope}-group-select`;
@@ -225,7 +248,8 @@
     const RENAME_GROUP_ID = `${MODULE_NAME}-${scope}-rename-group`;
     const DELETE_GROUP_ID = `${MODULE_NAME}-${scope}-delete-group`;
 
-    let store = sanitizeStore(loadJson(STORAGE_KEY, createDefaultStore()));
+    let store = createDefaultStore();
+    let currentStoreKey = '';
     let listObserver = null;
     let domObserver = null;
     let rendering = false;
@@ -240,9 +264,27 @@
       if (listObserver) listObserver.disconnect();
     }
 
+    function getStoreKey() {
+      return `${MODULE_NAME}:${getScopeContextKey(scope)}:store`;
+    }
+
+    function loadStoreForCurrentContext() {
+      const nextStoreKey = getStoreKey();
+      if (nextStoreKey === currentStoreKey) return false;
+
+      currentStoreKey = nextStoreKey;
+      store = sanitizeStore(loadJson(currentStoreKey, createDefaultStore()));
+      lastRenderedGroupSignature = '';
+      selectedGroupId = UNGROUPED_ID;
+      return true;
+    }
+
+    loadStoreForCurrentContext();
+
     function saveStore() {
       store = sanitizeStore(store);
-      saveJson(STORAGE_KEY, store);
+      if (!currentStoreKey) currentStoreKey = getStoreKey();
+      saveJson(currentStoreKey, store);
     }
 
     function savePanelCollapsed() {
@@ -263,6 +305,32 @@
 
     function getGroups() {
       return getSortedGroups(store.groups);
+    }
+
+    function findGroupByNormalizedName(name, excludeGroupId = '') {
+      const normalized = normalizeName(name);
+      return store.groups.find((group) => group.id !== excludeGroupId && normalizeName(group.name) === normalized);
+    }
+
+    function validateGroupName(name, excludeGroupId = '') {
+      const normalized = normalizeName(name);
+      if (!normalized) {
+        toast('分组名称不能为空', 'warning');
+        return '';
+      }
+
+      if (normalized === '未分组') {
+        toast('“未分组”是保留名称，不能使用', 'warning');
+        return '';
+      }
+
+      const duplicate = findGroupByNormalizedName(normalized, excludeGroupId);
+      if (duplicate) {
+        toast('已存在同名分组', 'warning');
+        return '';
+      }
+
+      return normalized;
     }
 
     function collectItems(listEl = getListEl()) {
@@ -697,7 +765,7 @@
     }
 
     async function addGroup() {
-      const name = normalizeName(await openPrompt('输入分组名称，例如 A组 / B组'));
+      const name = validateGroupName(await openPrompt('输入分组名称，例如 A组 / B组'));
       if (!name) return;
 
       store.groups.push({
@@ -713,7 +781,7 @@
       const group = store.groups.find((entry) => entry.id === groupId);
       if (!group) return;
 
-      const nextName = normalizeName(await openPrompt('输入新的分组名称', group.name));
+      const nextName = validateGroupName(await openPrompt('输入新的分组名称', group.name), group.id);
       if (!nextName) return;
 
       group.name = nextName;
@@ -742,6 +810,7 @@
       const listEl = getListEl();
       if (!headerEl || !listEl) return;
 
+      loadStoreForCurrentContext();
       pauseListObserver();
       rendering = true;
       try {

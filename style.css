@@ -114,12 +114,6 @@
   pointer-events: none;
 }
 
-.st-rmg-group-header.st-rmg-drop-target {
-  border-color: rgba(120, 220, 170, 0.8);
-  background: rgba(110, 235, 175, 0.16);
-  box-shadow: 0 0 0 1px rgba(110, 235, 175, 0.2), 0 0 12px rgba(110, 235, 175, 0.18);
-}
-
 .st-rmg-group-count {
   opacity: 0.7;
 }

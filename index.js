@@ -368,26 +368,21 @@
       if (!selectEl) return;
 
       const nextSignature = getGroupSignature();
-      const previousValue = selectEl.value || '';
+      const previousValue = selectEl.value || UNGROUPED_ID;
 
       if (lastRenderedGroupSignature === nextSignature && selectEl.options.length > 0) {
         const stillExists = Array.from(selectEl.options).some((option) => option.value === previousValue);
-        if (!stillExists) selectEl.value = selectEl.options[0]?.value || '';
+        if (!stillExists) selectEl.value = selectEl.options[0]?.value || UNGROUPED_ID;
         return;
       }
 
       const groups = getGroups();
       selectEl.innerHTML = '';
 
-      if (groups.length < 1) {
-        const emptyOption = document.createElement('option');
-        emptyOption.value = '';
-        emptyOption.textContent = '请选择分组';
-        selectEl.appendChild(emptyOption);
-        selectEl.value = '';
-        lastRenderedGroupSignature = nextSignature;
-        return;
-      }
+      const ungroupedOption = document.createElement('option');
+      ungroupedOption.value = UNGROUPED_ID;
+      ungroupedOption.textContent = '未分组';
+      selectEl.appendChild(ungroupedOption);
 
       for (const group of groups) {
         const optionEl = document.createElement('option');
@@ -398,25 +393,30 @@
 
       selectEl.value = Array.from(selectEl.options).some((option) => option.value === previousValue)
         ? previousValue
-        : groups[0].id;
+        : UNGROUPED_ID;
       lastRenderedGroupSignature = nextSignature;
     }
 
     function renderGroupManager(containerEl) {
       if (!containerEl) return;
       containerEl.innerHTML = `
+        <div class="st-rmg-group-actions">
+          <button type="button" class="menu_button interactable" id="${NEW_GROUP_ID}">新增分组</button>
+          <button type="button" class="menu_button interactable" id="${RENAME_GROUP_ID}">重命名分组</button>
+          <button type="button" class="menu_button interactable st-rmg-danger" id="${DELETE_GROUP_ID}">删除分组</button>
+        </div>
         <select id="${GROUP_SELECT_ID}" class="text_pole st-rmg-group-select"></select>
-        <button type="button" class="menu_button interactable" id="${RENAME_GROUP_ID}">重命名分组</button>
-        <button type="button" class="menu_button interactable st-rmg-danger" id="${DELETE_GROUP_ID}">删除分组</button>
       `;
 
-      populateGroupSelect(containerEl.querySelector(`#${GROUP_SELECT_ID}`));
+      const selectEl = containerEl.querySelector(`#${GROUP_SELECT_ID}`);
+      populateGroupSelect(selectEl);
 
-      const hasGroups = getGroups().length > 0;
+      const selectedGroupId = String(selectEl?.value || UNGROUPED_ID);
+      const canEditGroup = selectedGroupId !== UNGROUPED_ID && getGroups().some((group) => group.id === selectedGroupId);
       const renameBtn = containerEl.querySelector(`#${RENAME_GROUP_ID}`);
       const deleteBtn = containerEl.querySelector(`#${DELETE_GROUP_ID}`);
-      if (renameBtn) renameBtn.disabled = !hasGroups;
-      if (deleteBtn) deleteBtn.disabled = !hasGroups;
+      if (renameBtn) renameBtn.disabled = !canEditGroup;
+      if (deleteBtn) deleteBtn.disabled = !canEditGroup;
     }
 
     function renderGroupedList(items) {
@@ -765,6 +765,12 @@
         togglePanelCollapsed();
       });
 
+      headerEl.addEventListener('change', (e) => {
+        if (e.target?.matches?.(`#${GROUP_SELECT_ID}`)) {
+          renderGroupManager(headerEl.querySelector('.st-rmg-group-manager'));
+        }
+      });
+
       headerEl.addEventListener('click', (e) => {
         const addBtn = e.target?.closest?.(`#${NEW_GROUP_ID}`);
         if (addBtn) {
@@ -847,7 +853,6 @@
           </div>
           <div class="st-rmg-panel-body">
             <div class="st-rmg-toolbar">
-              <button type="button" class="menu_button interactable" id="${NEW_GROUP_ID}">新增分组</button>
               <div class="st-rmg-group-manager"></div>
             </div>
           </div>

@@ -50,21 +50,27 @@
 .st-rmg-toolbar {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-  margin-bottom: 4px;
+  gap: 4px;
+  align-items: stretch;
+  margin-bottom: 3px;
 }
 
 .st-rmg-group-manager {
+  display: grid;
+  width: 100%;
+  gap: 4px;
+}
+
+.st-rmg-group-actions {
   display: flex;
-  flex: 1 1 280px;
-  gap: 6px;
+  flex-wrap: wrap;
+  gap: 4px;
   align-items: center;
 }
 
 .st-rmg-group-select {
-  min-width: 180px;
-  flex: 1 1 180px;
+  width: 100%;
+  min-width: 0;
 }
 
 .st-rmg-empty {
@@ -83,7 +89,7 @@
   align-items: center;
   gap: 6px;
   padding: 5px 8px;
-  margin-top: 1px;
+  margin-top: 0;
   margin-bottom: 0;
   border-radius: 8px;
   border: 1px solid var(--mainColor, rgba(255, 255, 255, 0.14));
@@ -93,8 +99,8 @@
 
 .st-rmg-sort-anchor {
   display: block;
-  min-height: 6px;
-  height: 6px;
+  min-height: 4px;
+  height: 4px;
   margin: 0;
   padding: 0;
   border: 0;
@@ -127,7 +133,8 @@
     align-items: stretch;
   }
 
-  .st-rmg-group-manager {
-    width: 100%;
+  .st-rmg-group-actions {
+    flex-direction: column;
+    align-items: stretch;
   }
 }

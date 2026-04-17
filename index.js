@@ -178,7 +178,8 @@
       version: STORAGE_VERSION,
       groups: [],
       assignments: {},
-      collapsed: {}
+      collapsed: {},
+      disabledFolders: {}
     };
   }
 
@@ -187,6 +188,7 @@
     const rawGroups = Array.isArray(source.groups) ? source.groups : [];
     const assignments = source.assignments && typeof source.assignments === 'object' ? source.assignments : {};
     const collapsed = source.collapsed && typeof source.collapsed === 'object' ? source.collapsed : {};
+    const disabledFolders = source.disabledFolders && typeof source.disabledFolders === 'object' ? source.disabledFolders : {};
 
     const groups = rawGroups
       .map((group, index) => ({
@@ -206,6 +208,11 @@
       ),
       collapsed: Object.fromEntries(
         Object.entries(collapsed)
+          .filter(([key]) => !!key)
+          .map(([key, value]) => [String(key), !!value])
+      ),
+      disabledFolders: Object.fromEntries(
+        Object.entries(disabledFolders)
           .filter(([key]) => !!key)
           .map(([key, value]) => [String(key), !!value])
       )
@@ -332,15 +339,7 @@
         : items.filter((item) => store.assignments[item.id] === groupId);
 
       if (folderItems.length < 1) return STATE_ENABLED;
-
-      const scriptsById = new Map(
-        getScriptsByCurrentScope()
-          .filter((script) => !!script?.id)
-          .map((script) => [`dom:${script.id}`, !!script.disabled])
-      );
-
-      const disabledCount = folderItems.filter((item) => scriptsById.get(item.id) === true).length;
-      return disabledCount === folderItems.length ? STATE_DISABLED : STATE_ENABLED;
+      return store.disabledFolders?.[groupId] ? STATE_DISABLED : STATE_ENABLED;
     }
 
     function getScriptType() {
@@ -399,40 +398,43 @@
       }
     }
 
-    async function setFolderEnabled(groupId, enabled) {
-      const ctx = getCtx();
-      const items = collectItems();
-      const itemIds = new Set(
-        items
-          .filter((item) => (groupId === UNGROUPED_ID ? !store.assignments[item.id] : store.assignments[item.id] === groupId))
-          .map((item) => item.id)
-      );
-      if (itemIds.size < 1) return;
-
-      const currentScripts = getScriptsByCurrentScope(ctx);
-      if (!Array.isArray(currentScripts) || currentScripts.length < 1) return;
-
-      let changed = false;
-      const nextScripts = currentScripts.map((script) => {
-        if (!script?.id || !itemIds.has(`dom:${script.id}`)) return script;
-        const shouldDisable = !enabled;
-        if (!!script.disabled === shouldDisable) return script;
-        changed = true;
-        return { ...script, disabled: shouldDisable };
-      });
-
-      if (!changed) return;
-
-      await saveScriptsForCurrentScope(nextScripts, ctx);
-
-      for (const item of items) {
-        if (!itemIds.has(item.id)) continue;
-        const checkbox = item.el?.querySelector?.('.disable_regex');
-        if (checkbox) checkbox.checked = !enabled;
+    function setFolderEnabled(groupId, enabled) {
+      if (!store.disabledFolders || typeof store.disabledFolders !== 'object') {
+        store.disabledFolders = {};
       }
 
-      await reloadRegexUi(ctx);
+      if (enabled) delete store.disabledFolders[groupId];
+      else store.disabledFolders[groupId] = true;
+
+      saveStore();
       renderTree();
+    }
+
+    function syncFolderDisableState(items) {
+      let changed = false;
+
+      for (const item of items) {
+        const groupId = store.assignments[item.id] || UNGROUPED_ID;
+        const shouldDisable = !!store.disabledFolders?.[groupId];
+        const checkbox = item.el?.querySelector?.('.disable_regex');
+        if (checkbox && checkbox.checked !== shouldDisable) {
+          checkbox.checked = shouldDisable;
+          try {
+            checkbox.dispatchEvent(new Event('input', { bubbles: true }));
+            checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+          } catch {
+            // ignore
+          }
+        }
+
+        const script = getScriptsByCurrentScope().find((entry) => entry?.id && `dom:${entry.id}` === item.id);
+        if (script && !!script.disabled !== shouldDisable) {
+          script.disabled = shouldDisable;
+          changed = true;
+        }
+      }
+
+      return changed;
     }
 
     function findGroupByNormalizedName(name, excludeGroupId = '') {
@@ -528,6 +530,13 @@
         }
       }
 
+      for (const groupId of Object.keys(store.disabledFolders || {})) {
+        if (groupId !== UNGROUPED_ID && !validGroupIds.has(groupId)) {
+          delete store.disabledFolders[groupId];
+          changed = true;
+        }
+      }
+
       if (changed) saveStore();
     }
 
@@ -576,10 +585,13 @@
       const groups = getGroups();
       selectEl.innerHTML = '';
 
-      const ungroupedOption = document.createElement('option');
-      ungroupedOption.value = UNGROUPED_ID;
-      ungroupedOption.textContent = UNGROUPED_LABEL;
-      selectEl.appendChild(ungroupedOption);
+      const ungroupedCount = collectItems().filter((item) => !store.assignments[item.id]).length;
+      if (ungroupedCount > 0) {
+        const ungroupedOption = document.createElement('option');
+        ungroupedOption.value = UNGROUPED_ID;
+        ungroupedOption.textContent = UNGROUPED_LABEL;
+        selectEl.appendChild(ungroupedOption);
+      }
 
       for (const group of groups) {
         const optionEl = document.createElement('option');
@@ -590,7 +602,7 @@
 
       selectEl.value = Array.from(selectEl.options).some((option) => option.value === previousValue)
         ? previousValue
-        : UNGROUPED_ID;
+        : (selectEl.options[0]?.value || '');
       selectedGroupId = selectEl.value || UNGROUPED_ID;
       lastRenderedGroupSignature = nextSignature;
     }
@@ -1008,6 +1020,7 @@
         const items = collectItems(listEl);
         migrateLegacyAssignments(items);
         cleanupAssignments(items);
+        syncFolderDisableState(items);
 
         renderGroupedList(items);
         syncNativeSortableOptions(listEl);

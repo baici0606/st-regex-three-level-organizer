@@ -38,6 +38,7 @@
     return ctx?.getPresetManager?.('regex') || null;
   }
 
+
   function loadJson(key, fallback) {
     try {
       const raw = localStorage.getItem(key);
@@ -225,8 +226,8 @@
             String(key),
             Object.fromEntries(
               Object.entries(value)
-                .filter(([itemKey]) => !!itemKey)
-                .map(([itemKey, itemValue]) => [String(itemKey), !!itemValue])
+                .filter(([itemId]) => !!itemId)
+                .map(([itemId, itemValue]) => [String(itemId), !!itemValue])
             )
           ])
       )
@@ -419,11 +420,7 @@
         .map((item) => item.id);
     }
 
-    async function setFolderEnabled(groupId, enabled) {
-      const ctx = getCtx();
-      const currentScripts = getScriptsByCurrentScope(ctx);
-      if (!Array.isArray(currentScripts) || currentScripts.length < 1) return;
-
+    function setFolderEnabled(groupId, enabled) {
       const itemIds = new Set(getFolderItemIds(groupId));
       if (itemIds.size < 1) return;
 
@@ -434,77 +431,85 @@
         store.disabledSnapshots = {};
       }
 
-      const snapshot = store.disabledSnapshots[groupId] && typeof store.disabledSnapshots[groupId] === 'object'
-        ? { ...store.disabledSnapshots[groupId] }
-        : {};
-
-      let changed = false;
-      const nextScripts = currentScripts.map((script) => {
-        if (!script?.id) return script;
-
-        const itemId = `dom:${script.id}`;
-        if (!itemIds.has(itemId)) return script;
-
-        if (!enabled) {
-          snapshot[itemId] = !!script.disabled;
-          if (!!script.disabled === true) return script;
-          changed = true;
-          return { ...script, disabled: true };
-        }
-
-        const restoreDisabled = snapshot[itemId] === true;
-        if (!!script.disabled === restoreDisabled) return script;
-        changed = true;
-        return { ...script, disabled: restoreDisabled };
-      });
-
       if (!enabled) {
         store.disabledFolders[groupId] = true;
-        store.disabledSnapshots[groupId] = snapshot;
       } else {
         delete store.disabledFolders[groupId];
-        delete store.disabledSnapshots[groupId];
       }
 
       saveStore();
-      if (changed) {
-        await saveScriptsForCurrentScope(nextScripts, ctx);
-        await reloadRegexUi(ctx);
-      }
       renderTree();
     }
 
-    async function syncFolderDisableState(items) {
+    async function syncFolderDisableOverlay(items) {
       const ctx = getCtx();
       const currentScripts = getScriptsByCurrentScope(ctx);
       if (!Array.isArray(currentScripts) || currentScripts.length < 1) return false;
 
-      const desiredDisabledById = new Map();
-      for (const item of items) {
-        const groupId = store.assignments[item.id] || UNGROUPED_ID;
-        if (store.disabledFolders?.[groupId]) {
-          desiredDisabledById.set(item.id, true);
-        } else {
-          desiredDisabledById.set(item.id, false);
-        }
+      const scriptsByItemId = new Map(
+        currentScripts
+          .filter((script) => !!script?.id)
+          .map((script) => [`dom:${script.id}`, script])
+      );
 
-        const checkbox = item.el?.querySelector?.('.disable_regex');
-        if (checkbox) checkbox.checked = desiredDisabledById.get(item.id) === true;
+      if (!store.disabledSnapshots || typeof store.disabledSnapshots !== 'object') {
+        store.disabledSnapshots = {};
       }
 
-      let changed = false;
+      const nextSnapshots = {};
+      for (const [groupId, snapshot] of Object.entries(store.disabledSnapshots)) {
+        nextSnapshots[groupId] = { ...snapshot };
+      }
+
+      let storeChanged = false;
+      const desiredDisabledByItemId = new Map();
+
+      for (const item of items) {
+        const groupId = store.assignments[item.id] || UNGROUPED_ID;
+        const currentScript = scriptsByItemId.get(item.id);
+        if (!currentScript) continue;
+
+        if (store.disabledFolders?.[groupId]) {
+          if (!nextSnapshots[groupId]) nextSnapshots[groupId] = {};
+          if (!Object.prototype.hasOwnProperty.call(nextSnapshots[groupId], item.id)) {
+            nextSnapshots[groupId][item.id] = !!currentScript.disabled;
+            storeChanged = true;
+          }
+          desiredDisabledByItemId.set(item.id, true);
+          continue;
+        }
+
+        for (const [snapshotGroupId, snapshot] of Object.entries(nextSnapshots)) {
+          if (!Object.prototype.hasOwnProperty.call(snapshot, item.id)) continue;
+          desiredDisabledByItemId.set(item.id, !!snapshot[item.id]);
+          delete snapshot[item.id];
+          storeChanged = true;
+          if (Object.keys(snapshot).length < 1) {
+            delete nextSnapshots[snapshotGroupId];
+          }
+          break;
+        }
+      }
+
       const nextScripts = currentScripts.map((script) => {
         if (!script?.id) return script;
         const itemId = `dom:${script.id}`;
-        const shouldDisable = desiredDisabledById.get(itemId);
+        const shouldDisable = desiredDisabledByItemId.get(itemId);
         if (shouldDisable === undefined || !!script.disabled === shouldDisable) return script;
-        changed = true;
         return { ...script, disabled: shouldDisable };
       });
 
-      if (!changed) return false;
+      const scriptsChanged = nextScripts.some((script, index) => script !== currentScripts[index]);
+
+      if (storeChanged) {
+        store.disabledSnapshots = nextSnapshots;
+        saveStore();
+      }
+
+      if (!scriptsChanged) return false;
 
       await saveScriptsForCurrentScope(nextScripts, ctx);
+      await reloadRegexUi(ctx);
       return true;
     }
 
@@ -781,7 +786,13 @@
       function pushItem(item, hidden) {
         item.el.classList.toggle(HIDDEN_CLASS, hidden);
         const groupId = store.assignments[item.id] || UNGROUPED_ID;
-        item.el.classList.toggle('st-rmg-folder-item-disabled', !!store.disabledFolders?.[groupId]);
+        const isFolderDisabled = !!store.disabledFolders?.[groupId];
+        item.el.classList.toggle('st-rmg-folder-item-disabled', isFolderDisabled);
+        const disableCheckbox = item.el.querySelector?.('.disable_regex');
+        if (disableCheckbox instanceof HTMLElement) {
+          disableCheckbox.disabled = isFolderDisabled;
+          disableCheckbox.title = isFolderDisabled ? `当前${FOLDER_LABEL}已关闭，无法单独切换` : '';
+        }
         item.el.style.removeProperty('order');
         fragment.appendChild(item.el);
       }
@@ -1106,9 +1117,8 @@
         const items = collectItems(listEl);
         migrateLegacyAssignments(items);
         cleanupAssignments(items);
-        const folderDisableChanged = await syncFolderDisableState(items);
-        if (folderDisableChanged) {
-          await reloadRegexUi();
+        const overlayChanged = await syncFolderDisableOverlay(items);
+        if (overlayChanged) {
           schedule(() => {
             renderTree();
           });

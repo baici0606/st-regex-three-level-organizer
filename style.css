@@ -105,8 +105,9 @@
 }
 
 .st-rmg-folder-disabled {
-  background: rgba(40, 48, 68, 0.48);
-  border-color: rgba(120, 140, 180, 0.28);
+  background: rgba(28, 34, 48, 0.82);
+  border-color: rgba(132, 150, 188, 0.42);
+  box-shadow: inset 0 0 0 1px rgba(18, 22, 32, 0.55);
 }
 
 .st-rmg-folder-handle {
@@ -212,8 +213,9 @@
 }
 
 .st-rmg-folder-item-disabled {
-  opacity: 0.72;
-  filter: brightness(0.72);
+  opacity: 0.58;
+  filter: brightness(0.52) saturate(0.8);
+  background: rgba(18, 22, 32, 0.34);
 }
 
 .st-rmg-folder-item-locked {

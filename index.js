@@ -483,13 +483,12 @@
         const groupId = store.assignments[item.id] || UNGROUPED_ID;
         if (store.disabledFolders?.[groupId]) {
           desiredDisabledById.set(item.id, true);
-          continue;
+        } else {
+          desiredDisabledById.set(item.id, false);
         }
 
-        const snapshot = store.disabledSnapshots?.[groupId];
-        if (snapshot && Object.prototype.hasOwnProperty.call(snapshot, item.id)) {
-          desiredDisabledById.set(item.id, !!snapshot[item.id]);
-        }
+        const checkbox = item.el?.querySelector?.('.disable_regex');
+        if (checkbox) checkbox.checked = desiredDisabledById.get(item.id) === true;
       }
 
       let changed = false;
@@ -505,7 +504,6 @@
       if (!changed) return false;
 
       await saveScriptsForCurrentScope(nextScripts, ctx);
-      await reloadRegexUi(ctx);
       return true;
     }
 
@@ -759,7 +757,7 @@
           header.classList.add('st-rmg-folder-disabled');
         }
         header.innerHTML = `
-          <span class="st-rmg-folder-handle" draggable="true" title="拖动排序" aria-label="拖动排序">&#8801;&#8801;</span>
+          <span class="st-rmg-folder-handle" draggable="true" title="拖动排序" aria-label="拖动排序">&#8801;</span>
           <span class="st-rmg-group-name">${escapeHtml(title)}</span>
           <span class="st-rmg-group-count">(${count})</span>
           <button type="button" class="st-rmg-folder-switch ${folderState === STATE_DISABLED ? 'is-off' : 'is-on'}" data-folder-toggle="${escapeHtml(groupId)}" title="${escapeHtml(toggleTitle)}" aria-pressed="${folderState === STATE_DISABLED ? 'false' : 'true'}">
@@ -1095,7 +1093,7 @@
       renderTree();
     }
 
-    function renderTree() {
+    async function renderTree() {
       const headerEl = getHeaderEl();
       const listEl = getListEl();
       if (!headerEl || !listEl) return;
@@ -1107,6 +1105,11 @@
         const items = collectItems(listEl);
         migrateLegacyAssignments(items);
         cleanupAssignments(items);
+        const folderDisableChanged = await syncFolderDisableState(items);
+        if (folderDisableChanged) {
+          await reloadRegexUi();
+          return;
+        }
 
         renderGroupedList(items);
         syncNativeSortableOptions(listEl);
@@ -1179,6 +1182,12 @@
           const groupId = String(toggleBtn.dataset.folderToggle || UNGROUPED_ID);
           const enabled = toggleBtn.classList.contains('is-off');
           void setFolderEnabled(groupId, enabled);
+          return;
+        }
+
+        if (e.target?.closest?.('.st-rmg-folder-handle')) {
+          e.preventDefault();
+          e.stopPropagation();
           return;
         }
 

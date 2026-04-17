@@ -5,6 +5,6 @@
   "js": "index.js",
   "css": "style.css",
   "author": "匿名DC用户",
-  "version": "1.1",
+  "version": "1.2",
   "description": "A SillyTavern frontend plugin for organizing global, preset, and scoped regex scripts into manual folders while preserving native regex drag sorting."
 }

@@ -230,6 +230,8 @@
     let domObserver = null;
     let rendering = false;
     let sorting = false;
+    let sortingItemId = '';
+    let sortingTargetGroupId = undefined;
     let selectedItemIds = new Set();
     let lastRenderedGroupSignature = '';
     let panelCollapsed = !!loadJson(PANEL_COLLAPSED_KEY, false);
@@ -608,6 +610,53 @@
       anchorEl.insertAdjacentElement('beforebegin', placeholderEl);
     }
 
+    function getGroupIdForListChild(listEl, childEl) {
+      if (!(childEl instanceof HTMLElement) || childEl.parentElement !== listEl) return undefined;
+
+      if (childEl.classList.contains('st-rmg-group-header')) {
+        return String(childEl.dataset.groupId || UNGROUPED_ID);
+      }
+
+      if (childEl.classList.contains('st-rmg-sort-anchor')) {
+        return String(childEl.dataset.groupId || UNGROUPED_ID);
+      }
+
+      if (childEl.classList.contains('regex-script-label')) {
+        let probe = childEl.previousElementSibling;
+        while (probe) {
+          if (probe.classList?.contains('st-rmg-sort-anchor')) {
+            return String(probe.dataset.groupId || UNGROUPED_ID);
+          }
+          if (probe.classList?.contains('st-rmg-group-header')) {
+            return String(probe.dataset.groupId || UNGROUPED_ID);
+          }
+          probe = probe.previousElementSibling;
+        }
+        return UNGROUPED_ID;
+      }
+
+      return undefined;
+    }
+
+    function getGroupIdFromPointer(listEl, event) {
+      if (typeof document.elementsFromPoint !== 'function') return undefined;
+
+      const pointer = getPointerClientPosition(event);
+      if (!pointer) return undefined;
+
+      const hoveredElements = document.elementsFromPoint(pointer.clientX, pointer.clientY);
+      for (const hoveredEl of hoveredElements) {
+        if (!(hoveredEl instanceof HTMLElement)) continue;
+        if (hoveredEl.classList.contains('ui-sortable-helper') || hoveredEl.classList.contains('ui-sortable-placeholder')) continue;
+
+        const listChild = hoveredEl.closest('.st-rmg-group-header, .st-rmg-sort-anchor, .regex-script-label');
+        const groupId = getGroupIdForListChild(listEl, listChild);
+        if (groupId !== undefined) return groupId;
+      }
+
+      return undefined;
+    }
+
     function bindNativeSortableEvents(listEl = getListEl()) {
       const $ = getJQuery();
       if (!listEl || typeof $ !== 'function' || !$.fn?.sortable) return;
@@ -632,16 +681,26 @@
 
         const wrappedStart = function (event, ui) {
           sorting = true;
+          sortingItemId = getItemId(ui?.item?.[0]);
+          sortingTargetGroupId = undefined;
           pauseListObserver();
           return originalStart ? originalStart.call(this, event, ui) : undefined;
         };
 
         const wrappedSort = function (event, ui) {
+          const hoveredGroupId = getGroupIdFromPointer(listEl, event);
+          if (hoveredGroupId !== undefined) sortingTargetGroupId = hoveredGroupId;
           movePlaceholderIntoHoveredGroup(listEl, event, ui);
           return originalSort ? originalSort.call(this, event, ui) : undefined;
         };
 
         const wrappedStop = function (...args) {
+          if (sortingItemId) {
+            if (!sortingTargetGroupId || sortingTargetGroupId === UNGROUPED_ID) delete store.assignments[sortingItemId];
+            else store.assignments[sortingItemId] = sortingTargetGroupId;
+            saveStore();
+          }
+
           const changed = syncAssignmentsFromRenderedLayout(listEl);
           const result = originalStop ? originalStop.apply(this, args) : undefined;
 
@@ -649,6 +708,8 @@
             .catch(() => {})
             .finally(() => {
               sorting = false;
+              sortingItemId = '';
+              sortingTargetGroupId = undefined;
               schedule(() => {
                 if (changed) renderTree();
                 else startListObserver(getListEl());

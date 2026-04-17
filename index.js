@@ -168,7 +168,6 @@
     const HEADER_ID = `${MODULE_NAME}-${scope}-header`;
     const GROUP_SELECT_ID = `${MODULE_NAME}-${scope}-select`;
     const SCRIPT_LIST_ID = `${MODULE_NAME}-${scope}-script-list`;
-    const TARGETS_ID = `${MODULE_NAME}-${scope}-targets`;
     const NEW_GROUP_ID = `${MODULE_NAME}-${scope}-new-group`;
     const MOVE_ID = `${MODULE_NAME}-${scope}-move`;
     const UNGROUP_ID = `${MODULE_NAME}-${scope}-ungroup`;
@@ -271,21 +270,6 @@
         ? previousValue
         : UNGROUPED_ID;
       selectEl.value = nextValue;
-    }
-
-    function renderTargetButtons(containerEl) {
-      if (!containerEl) return;
-      const groups = getGroups();
-
-      containerEl.innerHTML = [
-        `<button type="button" class="menu_button interactable st-rmg-target-btn st-rmg-target-ungrouped" data-group-target="${UNGROUPED_ID}">未分组</button>`
-      ]
-        .concat(
-          groups.map(
-            (group) => `<button type="button" class="menu_button interactable st-rmg-target-btn" data-group-target="${escapeHtml(group.id)}">${escapeHtml(group.name)}</button>`
-          )
-        )
-        .join('');
     }
 
     function renderGroupManager(containerEl) {
@@ -457,7 +441,6 @@
 
         renderGroupedList(items);
         populateGroupSelect(headerEl.querySelector(`#${GROUP_SELECT_ID}`));
-        renderTargetButtons(headerEl.querySelector(`#${TARGETS_ID}`));
         renderGroupManager(headerEl.querySelector('.st-rmg-group-manager'));
         syncSelectionUI(items);
         updateSelectedCount();
@@ -482,11 +465,6 @@
           return;
         }
 
-        if (e.target?.id === GROUP_SELECT_ID) {
-          e.preventDefault();
-          e.stopPropagation();
-          assignSelected(String(e.target.value || UNGROUPED_ID));
-        }
       });
 
       headerEl.addEventListener('click', (e) => {
@@ -520,14 +498,6 @@
           e.preventDefault();
           e.stopPropagation();
           renderTree();
-          return;
-        }
-
-        const targetBtn = e.target?.closest?.('[data-group-target]');
-        if (targetBtn) {
-          e.preventDefault();
-          e.stopPropagation();
-          assignSelected(String(targetBtn.dataset.groupTarget || UNGROUPED_ID));
           return;
         }
 
@@ -605,7 +575,6 @@
             <button type="button" class="menu_button interactable" id="${UNGROUP_ID}">移到未分组</button>
             <button type="button" class="menu_button interactable" id="${REFRESH_ID}">刷新</button>
           </div>
-          <div class="st-rmg-targets" id="${TARGETS_ID}"></div>
           <div class="st-rmg-group-manager"></div>
           <div class="st-rmg-script-list" id="${SCRIPT_LIST_ID}"></div>
         `;

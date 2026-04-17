@@ -28,6 +28,30 @@
     return window.SillyTavern?.getContext?.();
   }
 
+  function captureViewportState(anchorEl) {
+    const scrollEl = document.scrollingElement || document.documentElement || document.body;
+    const anchorTop = anchorEl instanceof HTMLElement ? anchorEl.getBoundingClientRect().top : null;
+    return {
+      scrollTop: scrollEl?.scrollTop ?? window.pageYOffset ?? 0,
+      anchorTop,
+      anchorEl: anchorEl instanceof HTMLElement ? anchorEl : null
+    };
+  }
+
+  function restoreViewportState(state) {
+    if (!state) return;
+
+    const scrollEl = document.scrollingElement || document.documentElement || document.body;
+    const currentAnchorTop = state.anchorEl instanceof HTMLElement ? state.anchorEl.getBoundingClientRect().top : null;
+
+    if (state.anchorTop != null && currentAnchorTop != null && scrollEl) {
+      scrollEl.scrollTop += currentAnchorTop - state.anchorTop;
+      return;
+    }
+
+    window.scrollTo(0, state.scrollTop ?? 0);
+  }
+
   function getSelectedRegexPreset(ctx = getCtx()) {
     const presets = ctx?.extensionSettings?.regex_presets;
     if (!Array.isArray(presets)) return null;
@@ -420,9 +444,11 @@
         .map((item) => item.id);
     }
 
-    function setFolderEnabled(groupId, enabled) {
+    async function setFolderEnabled(groupId, enabled) {
       const itemIds = new Set(getFolderItemIds(groupId));
       if (itemIds.size < 1) return;
+
+      const viewportState = captureViewportState(getHeaderEl());
 
       if (!store.disabledFolders || typeof store.disabledFolders !== 'object') {
         store.disabledFolders = {};
@@ -438,7 +464,10 @@
       }
 
       saveStore();
-      renderTree();
+      await renderTree();
+      schedule(() => {
+        restoreViewportState(viewportState);
+      });
     }
 
     async function syncFolderDisableOverlay(items) {

@@ -166,6 +166,7 @@
   function createPanelController({ scope, blockId, listId, titleText }) {
     const STORAGE_KEY = `${MODULE_NAME}:${scope}:store`;
     const HEADER_ID = `${MODULE_NAME}-${scope}-header`;
+    const PANEL_COLLAPSED_KEY = `${MODULE_NAME}:${scope}:panel-collapsed`;
     const GROUP_SELECT_ID = `${MODULE_NAME}-${scope}-select`;
     const SCRIPT_LIST_ID = `${MODULE_NAME}-${scope}-script-list`;
     const NEW_GROUP_ID = `${MODULE_NAME}-${scope}-new-group`;
@@ -177,10 +178,15 @@
     let rendering = false;
     let selectedItemIds = new Set();
     let lastRenderedGroupSignature = '';
+    let panelCollapsed = !!loadJson(PANEL_COLLAPSED_KEY, false);
 
     function saveStore() {
       store = sanitizeStore(store);
       saveJson(STORAGE_KEY, store);
+    }
+
+    function savePanelCollapsed() {
+      saveJson(PANEL_COLLAPSED_KEY, !!panelCollapsed);
     }
 
     function getBlockEl() {
@@ -244,6 +250,26 @@
       if (!headerEl) return;
       const badge = headerEl.querySelector('.st-rmg-selected-count');
       if (badge) badge.textContent = `已选 ${selectedItemIds.size}`;
+    }
+
+    function applyPanelCollapsedState(headerEl) {
+      if (!headerEl) return;
+      headerEl.classList.toggle('st-rmg-panel-collapsed', !!panelCollapsed);
+
+      const arrowEl = headerEl.querySelector('[data-st-rmg-panel-arrow]');
+      if (arrowEl) arrowEl.textContent = panelCollapsed ? '▶' : '▼';
+
+      const titleEl = headerEl.querySelector('[data-st-rmg-panel-toggle]');
+      if (titleEl) {
+        titleEl.setAttribute('aria-expanded', panelCollapsed ? 'false' : 'true');
+        titleEl.setAttribute('title', panelCollapsed ? '点击展开分组面板' : '点击收起分组面板');
+      }
+    }
+
+    function togglePanelCollapsed(nextValue) {
+      panelCollapsed = typeof nextValue === 'boolean' ? nextValue : !panelCollapsed;
+      savePanelCollapsed();
+      applyPanelCollapsedState(getHeaderEl());
     }
 
     function getGroupSignature() {
@@ -479,6 +505,20 @@
         if (e.target?.closest?.('.st-rmg-script-entry')) e.stopPropagation();
       });
 
+      const panelToggleEl = headerEl.querySelector('[data-st-rmg-panel-toggle]');
+      panelToggleEl?.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        togglePanelCollapsed();
+      });
+
+      panelToggleEl?.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        e.stopPropagation();
+        togglePanelCollapsed();
+      });
+
       headerEl.addEventListener('change', (e) => {
         if (e.target?.classList?.contains('st-rmg-script-check')) {
           const itemId = String(e.target.value || '');
@@ -573,22 +613,28 @@
         headerEl.id = HEADER_ID;
         headerEl.className = 'st-rmg-header';
         headerEl.innerHTML = `
-          <div class="st-rmg-title-row">
-            <b>${escapeHtml(titleText)}分组</b>
+          <div class="st-rmg-title-row st-rmg-panel-toggle" data-st-rmg-panel-toggle role="button" tabindex="0" aria-expanded="true">
+            <div class="st-rmg-title-main">
+              <span class="st-rmg-panel-arrow" data-st-rmg-panel-arrow>▼</span>
+              <b>${escapeHtml(titleText)}分组</b>
+            </div>
             <span class="st-rmg-selected-count">已选 0</span>
           </div>
-          <div class="st-rmg-toolbar">
-            <button type="button" class="menu_button interactable" id="${NEW_GROUP_ID}">新增分组</button>
-            <select id="${GROUP_SELECT_ID}" class="text_pole st-rmg-select"></select>
-            <button type="button" class="menu_button interactable" id="${MOVE_ID}">移动到组</button>
+          <div class="st-rmg-panel-body">
+            <div class="st-rmg-toolbar">
+              <button type="button" class="menu_button interactable" id="${NEW_GROUP_ID}">新增分组</button>
+              <select id="${GROUP_SELECT_ID}" class="text_pole st-rmg-select"></select>
+              <button type="button" class="menu_button interactable" id="${MOVE_ID}">移动到组</button>
+            </div>
+            <div class="st-rmg-group-manager"></div>
+            <div class="st-rmg-script-list" id="${SCRIPT_LIST_ID}"></div>
           </div>
-          <div class="st-rmg-group-manager"></div>
-          <div class="st-rmg-script-list" id="${SCRIPT_LIST_ID}"></div>
         `;
         blockEl.insertAdjacentElement('afterbegin', headerEl);
         bindHeaderEvents(headerEl);
       }
 
+      applyPanelCollapsedState(headerEl);
       bindListEvents(listEl);
       startListObserver(listEl);
       renderTree();

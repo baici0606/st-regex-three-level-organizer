@@ -333,7 +333,13 @@
 
       if (folderItems.length < 1) return STATE_ENABLED;
 
-      const disabledCount = folderItems.filter((item) => item.el?.querySelector?.('.disable_regex')?.checked).length;
+      const scriptsById = new Map(
+        getScriptsByCurrentScope()
+          .filter((script) => !!script?.id)
+          .map((script) => [`dom:${script.id}`, !!script.disabled])
+      );
+
+      const disabledCount = folderItems.filter((item) => scriptsById.get(item.id) === true).length;
       return disabledCount === folderItems.length ? STATE_DISABLED : STATE_ENABLED;
     }
 
@@ -418,6 +424,13 @@
       if (!changed) return;
 
       await saveScriptsForCurrentScope(nextScripts, ctx);
+
+      for (const item of items) {
+        if (!itemIds.has(item.id)) continue;
+        const checkbox = item.el?.querySelector?.('.disable_regex');
+        if (checkbox) checkbox.checked = !enabled;
+      }
+
       await reloadRegexUi(ctx);
       renderTree();
     }
@@ -634,6 +647,10 @@
       const fragment = document.createDocumentFragment();
 
       const showUngrouped = (itemsByGroup.get(UNGROUPED_ID) || []).length > 0;
+      if (!showUngrouped && store.collapsed[UNGROUPED_ID]) {
+        delete store.collapsed[UNGROUPED_ID];
+        saveStore();
+      }
 
       function pushHeader(groupId, title, count) {
         const header = document.createElement('div');
@@ -649,7 +666,11 @@
           <span class="st-rmg-group-arrow">${store.collapsed[groupId] ? '▶' : '▼'}</span>
           <span class="st-rmg-group-name">${escapeHtml(title)}</span>
           <span class="st-rmg-group-count">(${count})</span>
-          <button type="button" class="menu_button interactable st-rmg-folder-toggle ${folderState === STATE_DISABLED ? 'st-rmg-folder-toggle-off' : ''}" data-folder-toggle="${escapeHtml(groupId)}" title="${escapeHtml(toggleTitle)}">${folderState === STATE_DISABLED ? '已关闭' : '已开启'}</button>
+          <button type="button" class="st-rmg-folder-switch ${folderState === STATE_DISABLED ? 'is-off' : 'is-on'}" data-folder-toggle="${escapeHtml(groupId)}" title="${escapeHtml(toggleTitle)}" aria-pressed="${folderState === STATE_DISABLED ? 'false' : 'true'}">
+            <span class="st-rmg-folder-switch-track">
+              <span class="st-rmg-folder-switch-thumb"></span>
+            </span>
+          </button>
         `;
         fragment.appendChild(header);
 

@@ -106,15 +106,46 @@
   min-width: 0;
 }
 
-.st-rmg-folder-toggle {
+.st-rmg-folder-switch {
   margin-left: auto;
-  min-width: 52px;
-  padding: 0 8px;
-  line-height: 1.6;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
 }
 
-.st-rmg-folder-toggle-off {
-  color: #ffb0b0;
+.st-rmg-folder-switch-track {
+  display: inline-flex;
+  align-items: center;
+  width: 38px;
+  height: 20px;
+  padding: 2px;
+  border-radius: 999px;
+  background: rgba(255, 120, 120, 0.45);
+  transition: background 0.15s ease;
+}
+
+.st-rmg-folder-switch-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.28);
+  transform: translateX(0);
+  transition: transform 0.15s ease;
+}
+
+.st-rmg-folder-switch.is-on .st-rmg-folder-switch-track {
+  background: rgba(68, 200, 120, 0.78);
+}
+
+.st-rmg-folder-switch.is-on .st-rmg-folder-switch-thumb {
+  transform: translateX(18px);
+}
+
+.st-rmg-folder-switch:focus-visible {
+  outline: 2px solid rgba(120, 200, 255, 0.9);
+  outline-offset: 2px;
 }
 
 .st-rmg-folder-draggable {

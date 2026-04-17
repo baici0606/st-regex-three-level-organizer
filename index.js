@@ -79,8 +79,8 @@
     return nameEl?.textContent?.trim() || nameEl?.getAttribute?.('title')?.trim() || '';
   }
 
-  function getItemId(itemEl, index) {
-    const value = [
+  function getItemKeyCandidate(itemEl) {
+    return [
       itemEl?.dataset?.scriptId,
       itemEl?.dataset?.regexScriptId,
       itemEl?.dataset?.regexId,
@@ -89,10 +89,59 @@
       itemEl?.getAttribute?.('data-regex-script-id'),
       itemEl?.getAttribute?.('data-regex-id'),
       itemEl?.getAttribute?.('data-id'),
-      itemEl?.id,
-      getScriptName(itemEl)
+      itemEl?.id
     ].find(Boolean);
-    return `${String(value || 'item').trim()}#${index}`;
+  }
+
+  function hashString(value) {
+    let hash = 5381;
+    for (let i = 0; i < value.length; i += 1) {
+      hash = ((hash << 5) + hash) ^ value.charCodeAt(i);
+    }
+    return (hash >>> 0).toString(36);
+  }
+
+  function getItemFingerprint(itemEl) {
+    if (!itemEl?.querySelectorAll) return '';
+
+    const parts = [];
+    for (const field of itemEl.querySelectorAll('input, textarea, select')) {
+      if (!(field instanceof HTMLElement)) continue;
+
+      const type = String(field.getAttribute('type') || '').toLowerCase();
+      const key = normalizeName(field.getAttribute('name') || field.id || field.className || field.tagName);
+      const value = type === 'checkbox' || type === 'radio'
+        ? (field.checked ? '1' : '0')
+        : normalizeName(field.value ?? field.textContent ?? '');
+
+      if (!key && !value) continue;
+      parts.push(`${key}=${value}`);
+    }
+
+    if (!parts.length) {
+      const name = normalizeName(getScriptName(itemEl));
+      if (name) parts.push(`name=${name}`);
+    }
+
+    return parts.length ? hashString(parts.join('\u001f')) : '';
+  }
+
+  function getItemId(itemEl) {
+    const candidate = normalizeName(getItemKeyCandidate(itemEl));
+    if (candidate) return `dom:${candidate}`;
+
+    const fingerprint = getItemFingerprint(itemEl);
+    if (fingerprint) return `fp:${fingerprint}`;
+
+    const name = normalizeName(getScriptName(itemEl));
+    if (name) return `name:${name}`;
+
+    return 'item:unknown';
+  }
+
+  function getLegacyItemId(itemEl, index) {
+    const value = normalizeName(getItemKeyCandidate(itemEl)) || normalizeName(getScriptName(itemEl)) || 'item';
+    return `${value}#${index}`;
   }
 
   function getDirectScriptItems(listEl) {
@@ -209,9 +258,45 @@
       return getDirectScriptItems(listEl).map((itemEl, index) => ({
         el: itemEl,
         index,
-        id: getItemId(itemEl, index),
+        keyCandidate: normalizeName(getItemKeyCandidate(itemEl)),
+        id: getItemId(itemEl),
+        legacyId: getLegacyItemId(itemEl, index),
         name: getScriptName(itemEl)
       }));
+    }
+
+    function migrateLegacyAssignments(items) {
+      let changed = false;
+
+      for (const item of items) {
+        let legacyKey = '';
+        let legacyGroupId = undefined;
+
+        if (item.legacyId && item.legacyId !== item.id) {
+          legacyKey = item.legacyId;
+          legacyGroupId = store.assignments[legacyKey];
+        }
+
+        if (legacyGroupId === undefined && item.keyCandidate) {
+          const legacyPrefix = `${item.keyCandidate}#`;
+          const matchedLegacyKeys = Object.keys(store.assignments).filter((key) => key.startsWith(legacyPrefix));
+          if (matchedLegacyKeys.length === 1) {
+            legacyKey = matchedLegacyKeys[0];
+            legacyGroupId = store.assignments[legacyKey];
+          }
+        }
+
+        if (legacyGroupId === undefined) continue;
+
+        if (store.assignments[item.id] === undefined) {
+          store.assignments[item.id] = legacyGroupId;
+        }
+
+        if (legacyKey) delete store.assignments[legacyKey];
+        changed = true;
+      }
+
+      if (changed) saveStore();
     }
 
     function syncSelectedIdsWithItems(items) {
@@ -398,7 +483,6 @@
       }
 
       function pushItem(item, hidden) {
-        item.el.dataset.stRmgItemId = item.id;
         item.el.classList.toggle(HIDDEN_CLASS, hidden);
         item.el.style.order = String(order++);
       }
@@ -480,23 +564,6 @@
       return true;
     }
 
-    function assignItemToGroup(itemId, targetGroupId) {
-      if (!itemId) return false;
-      if (!targetGroupId || targetGroupId === UNGROUPED_ID) delete store.assignments[itemId];
-      else store.assignments[itemId] = targetGroupId;
-
-      saveStore();
-      renderTree();
-      return true;
-    }
-
-    function clearDropTargets(listEl = getListEl()) {
-      if (!listEl) return;
-      for (const headerEl of listEl.querySelectorAll('.st-rmg-group-header.st-rmg-drop-target')) {
-        headerEl.classList.remove('st-rmg-drop-target');
-      }
-    }
-
     function renderTree() {
       const headerEl = getHeaderEl();
       const listEl = getListEl();
@@ -505,6 +572,7 @@
       rendering = true;
       try {
         const items = collectItems(listEl);
+        migrateLegacyAssignments(items);
         cleanupAssignments(items);
         syncSelectedIdsWithItems(items);
 
@@ -601,92 +669,6 @@
         saveStore();
         renderTree();
       });
-
-      listEl.addEventListener(
-        'dragstart',
-        (e) => {
-          const itemEl = e.target?.closest?.('.regex-script-label');
-          const itemId = String(itemEl?.dataset?.stRmgItemId || '');
-          if (!itemId) return;
-          dragItemId = itemId;
-          try {
-            e.dataTransfer?.setData?.('text/plain', itemId);
-            e.dataTransfer.effectAllowed = 'move';
-          } catch {
-            // ignore
-          }
-        },
-        true
-      );
-
-      listEl.addEventListener(
-        'dragend',
-        () => {
-          dragItemId = '';
-          clearDropTargets(listEl);
-        },
-        true
-      );
-
-      listEl.addEventListener(
-        'dragenter',
-        (e) => {
-          const headerEl = e.target?.closest?.('.st-rmg-group-header');
-          if (!headerEl || !dragItemId) return;
-          clearDropTargets(listEl);
-          headerEl.classList.add('st-rmg-drop-target');
-        },
-        true
-      );
-
-      listEl.addEventListener(
-        'dragover',
-        (e) => {
-          const headerEl = e.target?.closest?.('.st-rmg-group-header');
-          if (!headerEl || !dragItemId) return;
-          e.preventDefault();
-          try {
-            e.dataTransfer.dropEffect = 'move';
-          } catch {
-            // ignore
-          }
-          clearDropTargets(listEl);
-          headerEl.classList.add('st-rmg-drop-target');
-        },
-        true
-      );
-
-      listEl.addEventListener(
-        'dragleave',
-        (e) => {
-          const headerEl = e.target?.closest?.('.st-rmg-group-header');
-          if (!headerEl) return;
-          const related = e.relatedTarget;
-          if (related && headerEl.contains(related)) return;
-          headerEl.classList.remove('st-rmg-drop-target');
-        },
-        true
-      );
-
-      listEl.addEventListener(
-        'drop',
-        (e) => {
-          const headerEl = e.target?.closest?.('.st-rmg-group-header');
-          if (!headerEl) return;
-
-          const itemId = dragItemId || String(e.dataTransfer?.getData?.('text/plain') || '');
-          if (!itemId) return;
-
-          e.preventDefault();
-          e.stopPropagation();
-
-          const targetGroupId = String(headerEl.dataset.groupId || UNGROUPED_ID);
-          clearDropTargets(listEl);
-          dragItemId = '';
-          assignItemToGroup(itemId, targetGroupId);
-        },
-        true
-      );
     }
 
     function startListObserver(listEl) {

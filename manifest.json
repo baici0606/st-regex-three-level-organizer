@@ -1,10 +1,10 @@
 {
-  "name": "Regex Manual Groups",
-  "display_name": "酒馆正则手动分组 Regex Manual Groups",
+  "name": "st-regex-three-level-organizer",
+  "display_name": "酒馆正则分组整理器",
   "loading_order": 95,
   "js": "index.js",
   "css": "style.css",
-  "author": "Kilo",
-  "version": "0.1.0",
-  "description": "A SillyTavern frontend plugin for manually organizing regex scripts into named 1/2/3-level groups with add, rename, delete, and assignment tools."
+  "author": "Baici",
+  "version": "0.1.1",
+  "description": "A SillyTavern frontend plugin for organizing global, preset, and scoped regex scripts into manual groups while preserving native regex drag sorting."
 }

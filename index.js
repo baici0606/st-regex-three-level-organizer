@@ -215,6 +215,7 @@
     let listObserver = null;
     let domObserver = null;
     let rendering = false;
+    let selectedItemIds = new Set();
 
     function saveStore() {
       store = sanitizeStore(store);
@@ -279,9 +280,12 @@
     }
 
     function getSelectedItemIds() {
-      const headerEl = getHeaderEl();
-      if (!headerEl) return [];
-      return Array.from(headerEl.querySelectorAll('.st-rmg-script-check:checked')).map((input) => String(input.value));
+      return Array.from(selectedItemIds);
+    }
+
+    function syncSelectedIdsWithItems(items) {
+      const validIds = new Set(items.map((item) => item.id));
+      selectedItemIds = new Set(Array.from(selectedItemIds).filter((itemId) => validIds.has(itemId)));
     }
 
     function buildGroupOptions(byId) {
@@ -298,7 +302,7 @@
     function updateSelectedCount() {
       const headerEl = getHeaderEl();
       if (!headerEl) return;
-      const count = getSelectedItemIds().length;
+      const count = selectedItemIds.size;
       const badge = headerEl.querySelector('.st-rmg-selected-count');
       if (badge) badge.textContent = `已选 ${count}`;
     }
@@ -314,6 +318,8 @@
         const items = collectItems(listEl);
         const { byId, roots } = buildTree(store.groups);
         cleanupOrphanAssignments(items, byId);
+
+        syncSelectedIdsWithItems(items);
 
         const itemsByGroup = new Map();
         itemsByGroup.set(UNGROUPED_ID, []);
@@ -416,9 +422,10 @@
         .map((item) => {
           const assigned = store.assignments[item.id];
           const label = assigned ? getFullPath(assigned, buildTree(store.groups).byId) : '未分组';
+          const checked = selectedItemIds.has(item.id) ? 'checked' : '';
           return `
             <label class="st-rmg-script-entry" title="${escapeHtml(item.name)}">
-              <input type="checkbox" class="st-rmg-script-check" value="${escapeHtml(item.id)}">
+              <input type="checkbox" class="st-rmg-script-check" value="${escapeHtml(item.id)}" ${checked}>
               <span class="st-rmg-script-entry-name">${escapeHtml(item.name || '(未命名正则)')}</span>
               <span class="st-rmg-script-entry-path">${escapeHtml(label)}</span>
             </label>
@@ -480,13 +487,24 @@
         else store.assignments[itemId] = targetGroupId;
       }
 
+      selectedItemIds.clear();
       saveStore();
       renderTree();
     }
 
     function bindHeaderEvents(headerEl) {
+      headerEl.addEventListener('click', (e) => {
+        if (!e.target?.closest?.('.st-rmg-script-entry')) return;
+        e.stopPropagation();
+      });
+
       headerEl.addEventListener('change', (e) => {
         if (e.target?.classList?.contains('st-rmg-script-check')) {
+          const itemId = String(e.target.value || '');
+          if (itemId) {
+            if (e.target.checked) selectedItemIds.add(itemId);
+            else selectedItemIds.delete(itemId);
+          }
           updateSelectedCount();
         }
       });

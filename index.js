@@ -220,7 +220,10 @@
     const STORAGE_KEY = `${MODULE_NAME}:${scope}:store`;
     const HEADER_ID = `${MODULE_NAME}-${scope}-header`;
     const PANEL_COLLAPSED_KEY = `${MODULE_NAME}:${scope}:panel-collapsed`;
+    const GROUP_SELECT_ID = `${MODULE_NAME}-${scope}-group-select`;
     const NEW_GROUP_ID = `${MODULE_NAME}-${scope}-new-group`;
+    const RENAME_GROUP_ID = `${MODULE_NAME}-${scope}-rename-group`;
+    const DELETE_GROUP_ID = `${MODULE_NAME}-${scope}-delete-group`;
 
     let store = sanitizeStore(loadJson(STORAGE_KEY, createDefaultStore()));
     let listObserver = null;
@@ -229,6 +232,7 @@
     let sorting = false;
     let sortingItemId = '';
     let sortingTargetGroupId = undefined;
+    let lastRenderedGroupSignature = '';
     let panelCollapsed = !!loadJson(PANEL_COLLAPSED_KEY, false);
 
     function pauseListObserver() {
@@ -360,27 +364,59 @@
       );
     }
 
+    function populateGroupSelect(selectEl) {
+      if (!selectEl) return;
+
+      const nextSignature = getGroupSignature();
+      const previousValue = selectEl.value || '';
+
+      if (lastRenderedGroupSignature === nextSignature && selectEl.options.length > 0) {
+        const stillExists = Array.from(selectEl.options).some((option) => option.value === previousValue);
+        if (!stillExists) selectEl.value = selectEl.options[0]?.value || '';
+        return;
+      }
+
+      const groups = getGroups();
+      selectEl.innerHTML = '';
+
+      if (groups.length < 1) {
+        const emptyOption = document.createElement('option');
+        emptyOption.value = '';
+        emptyOption.textContent = '请选择分组';
+        selectEl.appendChild(emptyOption);
+        selectEl.value = '';
+        lastRenderedGroupSignature = nextSignature;
+        return;
+      }
+
+      for (const group of groups) {
+        const optionEl = document.createElement('option');
+        optionEl.value = group.id;
+        optionEl.textContent = group.name;
+        selectEl.appendChild(optionEl);
+      }
+
+      selectEl.value = Array.from(selectEl.options).some((option) => option.value === previousValue)
+        ? previousValue
+        : groups[0].id;
+      lastRenderedGroupSignature = nextSignature;
+    }
+
     function renderGroupManager(containerEl) {
       if (!containerEl) return;
-      const groups = getGroups();
+      containerEl.innerHTML = `
+        <select id="${GROUP_SELECT_ID}" class="text_pole st-rmg-group-select"></select>
+        <button type="button" class="menu_button interactable" id="${RENAME_GROUP_ID}">重命名分组</button>
+        <button type="button" class="menu_button interactable st-rmg-danger" id="${DELETE_GROUP_ID}">删除分组</button>
+      `;
 
-      containerEl.innerHTML = groups.length
-        ? groups
-            .map(
-              (group) => `
-                <div class="st-rmg-group-chip">
-                  <span class="st-rmg-group-chip-name">${escapeHtml(group.name)}</span>
-                  <button type="button" class="menu_button interactable st-rmg-chip-btn" data-group-rename="${escapeHtml(group.id)}" title="重命名分组" aria-label="重命名分组">
-                    <span class="fa-solid fa-pen-to-square" aria-hidden="true"></span>
-                  </button>
-                  <button type="button" class="menu_button interactable st-rmg-chip-btn st-rmg-danger" data-group-delete="${escapeHtml(group.id)}" title="删除分组" aria-label="删除分组">
-                    <span class="fa-solid fa-trash" aria-hidden="true"></span>
-                  </button>
-                </div>
-              `
-            )
-            .join('')
-        : '<div class="st-rmg-empty">还没有分组，先创建一个组。</div>';
+      populateGroupSelect(containerEl.querySelector(`#${GROUP_SELECT_ID}`));
+
+      const hasGroups = getGroups().length > 0;
+      const renameBtn = containerEl.querySelector(`#${RENAME_GROUP_ID}`);
+      const deleteBtn = containerEl.querySelector(`#${DELETE_GROUP_ID}`);
+      if (renameBtn) renameBtn.disabled = !hasGroups;
+      if (deleteBtn) deleteBtn.disabled = !hasGroups;
     }
 
     function renderGroupedList(items) {
@@ -623,7 +659,7 @@
             saveStore();
           }
 
-          const changed = syncAssignmentsFromRenderedLayout(listEl);
+          syncAssignmentsFromRenderedLayout(listEl);
           const result = originalStop ? originalStop.apply(this, args) : undefined;
 
           Promise.resolve(result)
@@ -633,8 +669,7 @@
               sortingItemId = '';
               sortingTargetGroupId = undefined;
               schedule(() => {
-                if (changed) renderTree();
-                else startListObserver(getListEl());
+                renderTree();
               });
             });
 
@@ -739,19 +774,21 @@
           return;
         }
 
-        const renameBtn = e.target?.closest?.('[data-group-rename]');
+        const renameBtn = e.target?.closest?.(`#${RENAME_GROUP_ID}`);
         if (renameBtn) {
           e.preventDefault();
           e.stopPropagation();
-          renameGroup(String(renameBtn.dataset.groupRename || ''));
+          const selectEl = headerEl.querySelector(`#${GROUP_SELECT_ID}`);
+          renameGroup(String(selectEl?.value || ''));
           return;
         }
 
-        const deleteBtn = e.target?.closest?.('[data-group-delete]');
+        const deleteBtn = e.target?.closest?.(`#${DELETE_GROUP_ID}`);
         if (deleteBtn) {
           e.preventDefault();
           e.stopPropagation();
-          deleteGroup(String(deleteBtn.dataset.groupDelete || ''));
+          const selectEl = headerEl.querySelector(`#${GROUP_SELECT_ID}`);
+          deleteGroup(String(selectEl?.value || ''));
         }
       });
     }
@@ -811,8 +848,8 @@
           <div class="st-rmg-panel-body">
             <div class="st-rmg-toolbar">
               <button type="button" class="menu_button interactable" id="${NEW_GROUP_ID}">新增分组</button>
+              <div class="st-rmg-group-manager"></div>
             </div>
-            <div class="st-rmg-group-manager"></div>
           </div>
         `;
         blockEl.insertAdjacentElement('afterbegin', headerEl);

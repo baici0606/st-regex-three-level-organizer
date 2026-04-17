@@ -146,9 +146,7 @@
 #saved_regex_scripts.st-rmg-grouping,
 #saved_preset_scripts.st-rmg-grouping,
 #saved_scoped_scripts.st-rmg-grouping {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  display: block;
 }
 
 .st-rmg-group-header {
@@ -156,6 +154,7 @@
   align-items: center;
   gap: 6px;
   padding: 5px 8px;
+  margin-top: 4px;
   border-radius: 8px;
   border: 1px solid var(--mainColor, rgba(255, 255, 255, 0.14));
   background: rgba(120, 160, 255, 0.08);

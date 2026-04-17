@@ -229,6 +229,7 @@
     let listObserver = null;
     let domObserver = null;
     let rendering = false;
+    let sorting = false;
     let selectedItemIds = new Set();
     let lastRenderedGroupSignature = '';
     let panelCollapsed = !!loadJson(PANEL_COLLAPSED_KEY, false);
@@ -569,20 +570,42 @@
       }
     }
 
+    function getPointerClientPosition(event) {
+      const source = event?.originalEvent || event;
+      const pageX = Number(source?.pageX ?? event?.pageX);
+      const pageY = Number(source?.pageY ?? event?.pageY);
+      const clientX = Number(source?.clientX ?? event?.clientX ?? (Number.isFinite(pageX) ? pageX - window.pageXOffset : NaN));
+      const clientY = Number(source?.clientY ?? event?.clientY ?? (Number.isFinite(pageY) ? pageY - window.pageYOffset : NaN));
+
+      if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return null;
+      return { clientX, clientY };
+    }
+
     function movePlaceholderIntoHoveredGroup(listEl, event, ui) {
       const placeholderEl = ui?.placeholder?.[0];
-      if (!placeholderEl || typeof document.elementFromPoint !== 'function') return;
+      if (!placeholderEl || typeof document.elementsFromPoint !== 'function') return;
 
-      const clientX = Number(event?.clientX);
-      const clientY = Number(event?.clientY);
-      if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return;
+      const pointer = getPointerClientPosition(event);
+      if (!pointer) return;
 
-      const hoveredEl = document.elementFromPoint(clientX, clientY);
-      const headerEl = hoveredEl?.closest?.('.st-rmg-group-header');
-      if (!headerEl || headerEl.parentElement !== listEl) return;
-      if (placeholderEl.previousElementSibling === headerEl) return;
+      const hoveredElements = document.elementsFromPoint(pointer.clientX, pointer.clientY);
+      const hoveredTarget = hoveredElements.find((el) => {
+        if (!(el instanceof HTMLElement)) return false;
+        if (el.classList.contains('ui-sortable-helper') || el.classList.contains('ui-sortable-placeholder')) return false;
+        return !!el.closest('.st-rmg-group-header, .st-rmg-sort-anchor');
+      });
 
-      headerEl.insertAdjacentElement('afterend', placeholderEl);
+      const groupMarkerEl = hoveredTarget?.closest?.('.st-rmg-group-header, .st-rmg-sort-anchor');
+      if (!groupMarkerEl || groupMarkerEl.parentElement !== listEl) return;
+
+      const anchorEl = groupMarkerEl.classList.contains('st-rmg-sort-anchor')
+        ? groupMarkerEl
+        : groupMarkerEl.nextElementSibling;
+
+      if (!anchorEl?.classList?.contains('st-rmg-sort-anchor')) return;
+      if (placeholderEl.nextElementSibling === anchorEl) return;
+
+      anchorEl.insertAdjacentElement('beforebegin', placeholderEl);
     }
 
     function bindNativeSortableEvents(listEl = getListEl()) {
@@ -594,12 +617,24 @@
         const instance = sortable.sortable('instance');
         if (!instance) return;
 
+        const currentStart = sortable.sortable('option', 'start');
         const currentSort = sortable.sortable('option', 'sort');
         const currentStop = sortable.sortable('option', 'stop');
-        if (currentSort === listEl.__stRmgWrappedSort && currentStop === listEl.__stRmgWrappedStop) return;
+        if (
+          currentStart === listEl.__stRmgWrappedStart
+          && currentSort === listEl.__stRmgWrappedSort
+          && currentStop === listEl.__stRmgWrappedStop
+        ) return;
 
+        const originalStart = typeof currentStart === 'function' ? currentStart : null;
         const originalSort = typeof currentSort === 'function' ? currentSort : null;
         const originalStop = typeof currentStop === 'function' ? currentStop : null;
+
+        const wrappedStart = function (event, ui) {
+          sorting = true;
+          pauseListObserver();
+          return originalStart ? originalStart.call(this, event, ui) : undefined;
+        };
 
         const wrappedSort = function (event, ui) {
           movePlaceholderIntoHoveredGroup(listEl, event, ui);
@@ -610,17 +645,23 @@
           const changed = syncAssignmentsFromRenderedLayout(listEl);
           const result = originalStop ? originalStop.apply(this, args) : undefined;
 
-          if (changed) {
-            schedule(() => {
-              renderTree();
+          Promise.resolve(result)
+            .catch(() => {})
+            .finally(() => {
+              sorting = false;
+              schedule(() => {
+                if (changed) renderTree();
+                else startListObserver(getListEl());
+              });
             });
-          }
 
           return result;
         };
 
+        listEl.__stRmgWrappedStart = wrappedStart;
         listEl.__stRmgWrappedSort = wrappedSort;
         listEl.__stRmgWrappedStop = wrappedStop;
+        sortable.sortable('option', 'start', wrappedStart);
         sortable.sortable('option', 'sort', wrappedSort);
         sortable.sortable('option', 'stop', wrappedStop);
       } catch {
@@ -808,7 +849,7 @@
 
       let scheduled = false;
       listObserver = new MutationObserver(() => {
-        if (rendering || scheduled) return;
+        if (rendering || sorting || scheduled) return;
         scheduled = true;
         schedule(() => {
           scheduled = false;

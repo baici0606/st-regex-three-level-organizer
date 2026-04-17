@@ -220,18 +220,15 @@
     const STORAGE_KEY = `${MODULE_NAME}:${scope}:store`;
     const HEADER_ID = `${MODULE_NAME}-${scope}-header`;
     const PANEL_COLLAPSED_KEY = `${MODULE_NAME}:${scope}:panel-collapsed`;
-    const GROUP_SELECT_ID = `${MODULE_NAME}-${scope}-select`;
-    const SCRIPT_LIST_ID = `${MODULE_NAME}-${scope}-script-list`;
     const NEW_GROUP_ID = `${MODULE_NAME}-${scope}-new-group`;
-    const MOVE_ID = `${MODULE_NAME}-${scope}-move`;
 
     let store = sanitizeStore(loadJson(STORAGE_KEY, createDefaultStore()));
     let listObserver = null;
     let domObserver = null;
     let rendering = false;
     let sorting = false;
-    let selectedItemIds = new Set();
-    let lastRenderedGroupSignature = '';
+    let sortingItemId = '';
+    let sortingTargetGroupId = undefined;
     let panelCollapsed = !!loadJson(PANEL_COLLAPSED_KEY, false);
 
     function pauseListObserver() {
@@ -308,11 +305,6 @@
       if (changed) saveStore();
     }
 
-    function syncSelectedIdsWithItems(items) {
-      const validIds = new Set(items.map((item) => item.id));
-      selectedItemIds = new Set(Array.from(selectedItemIds).filter((itemId) => validIds.has(itemId)));
-    }
-
     function cleanupAssignments(items) {
       const validItemIds = new Set(items.map((item) => item.id));
       const validGroupIds = new Set(store.groups.map((group) => group.id));
@@ -336,17 +328,6 @@
       }
 
       if (changed) saveStore();
-    }
-
-    function getSelectedItemIds() {
-      return Array.from(selectedItemIds);
-    }
-
-    function updateSelectedCount() {
-      const headerEl = getHeaderEl();
-      if (!headerEl) return;
-      const badge = headerEl.querySelector('.st-rmg-selected-count');
-      if (badge) badge.textContent = `已选 ${selectedItemIds.size}`;
     }
 
     function applyPanelCollapsedState(headerEl) {
@@ -379,40 +360,6 @@
       );
     }
 
-    function populateGroupSelect(selectEl) {
-      if (!selectEl) return;
-
-      const nextSignature = getGroupSignature();
-      const previousValue = selectEl.value || UNGROUPED_ID;
-
-      if (lastRenderedGroupSignature === nextSignature && selectEl.options.length > 0) {
-        const stillExists = Array.from(selectEl.options).some((option) => option.value === previousValue);
-        if (!stillExists) selectEl.value = UNGROUPED_ID;
-        return;
-      }
-
-      const groups = getGroups();
-      selectEl.innerHTML = '';
-
-      const ungroupedOption = document.createElement('option');
-      ungroupedOption.value = UNGROUPED_ID;
-      ungroupedOption.textContent = '未分组';
-      selectEl.appendChild(ungroupedOption);
-
-      for (const group of groups) {
-        const optionEl = document.createElement('option');
-        optionEl.value = group.id;
-        optionEl.textContent = group.name;
-        selectEl.appendChild(optionEl);
-      }
-
-      const nextValue = Array.from(selectEl.options).some((option) => option.value === previousValue)
-        ? previousValue
-        : UNGROUPED_ID;
-      selectEl.value = nextValue;
-      lastRenderedGroupSignature = nextSignature;
-    }
-
     function renderGroupManager(containerEl) {
       if (!containerEl) return;
       const groups = getGroups();
@@ -434,29 +381,6 @@
             )
             .join('')
         : '<div class="st-rmg-empty">还没有分组，先创建一个组。</div>';
-    }
-
-    function syncSelectionUI(items = collectItems()) {
-      const headerEl = getHeaderEl();
-      if (!headerEl) return;
-
-      const container = headerEl.querySelector(`#${SCRIPT_LIST_ID}`);
-      if (!container) return;
-
-      container.innerHTML = items
-        .map((item) => {
-          const assignedGroupId = store.assignments[item.id];
-          const assignedGroup = store.groups.find((group) => group.id === assignedGroupId);
-          const checked = selectedItemIds.has(item.id) ? 'checked' : '';
-          return `
-            <label class="st-rmg-script-entry" title="${escapeHtml(item.name)}">
-              <input type="checkbox" class="st-rmg-script-check" value="${escapeHtml(item.id)}" ${checked}>
-              <span class="st-rmg-script-entry-name">${escapeHtml(item.name || '(未命名正则)')}</span>
-              <span class="st-rmg-script-entry-path">${escapeHtml(assignedGroup?.name || '未分组')}</span>
-            </label>
-          `;
-        })
-        .join('');
     }
 
     function renderGroupedList(items) {
@@ -608,6 +532,53 @@
       anchorEl.insertAdjacentElement('beforebegin', placeholderEl);
     }
 
+    function getGroupIdForListChild(listEl, childEl) {
+      if (!(childEl instanceof HTMLElement) || childEl.parentElement !== listEl) return undefined;
+
+      if (childEl.classList.contains('st-rmg-group-header')) {
+        return String(childEl.dataset.groupId || UNGROUPED_ID);
+      }
+
+      if (childEl.classList.contains('st-rmg-sort-anchor')) {
+        return String(childEl.dataset.groupId || UNGROUPED_ID);
+      }
+
+      if (childEl.classList.contains('regex-script-label')) {
+        let probe = childEl.previousElementSibling;
+        while (probe) {
+          if (probe.classList?.contains('st-rmg-sort-anchor')) {
+            return String(probe.dataset.groupId || UNGROUPED_ID);
+          }
+          if (probe.classList?.contains('st-rmg-group-header')) {
+            return String(probe.dataset.groupId || UNGROUPED_ID);
+          }
+          probe = probe.previousElementSibling;
+        }
+        return UNGROUPED_ID;
+      }
+
+      return undefined;
+    }
+
+    function getGroupIdFromPointer(listEl, event) {
+      if (typeof document.elementsFromPoint !== 'function') return undefined;
+
+      const pointer = getPointerClientPosition(event);
+      if (!pointer) return undefined;
+
+      const hoveredElements = document.elementsFromPoint(pointer.clientX, pointer.clientY);
+      for (const hoveredEl of hoveredElements) {
+        if (!(hoveredEl instanceof HTMLElement)) continue;
+        if (hoveredEl.classList.contains('ui-sortable-helper') || hoveredEl.classList.contains('ui-sortable-placeholder')) continue;
+
+        const listChild = hoveredEl.closest('.st-rmg-group-header, .st-rmg-sort-anchor, .regex-script-label');
+        const groupId = getGroupIdForListChild(listEl, listChild);
+        if (groupId !== undefined) return groupId;
+      }
+
+      return undefined;
+    }
+
     function bindNativeSortableEvents(listEl = getListEl()) {
       const $ = getJQuery();
       if (!listEl || typeof $ !== 'function' || !$.fn?.sortable) return;
@@ -632,16 +603,26 @@
 
         const wrappedStart = function (event, ui) {
           sorting = true;
+          sortingItemId = getItemId(ui?.item?.[0]);
+          sortingTargetGroupId = undefined;
           pauseListObserver();
           return originalStart ? originalStart.call(this, event, ui) : undefined;
         };
 
         const wrappedSort = function (event, ui) {
+          const hoveredGroupId = getGroupIdFromPointer(listEl, event);
+          if (hoveredGroupId !== undefined) sortingTargetGroupId = hoveredGroupId;
           movePlaceholderIntoHoveredGroup(listEl, event, ui);
           return originalSort ? originalSort.call(this, event, ui) : undefined;
         };
 
         const wrappedStop = function (...args) {
+          if (sortingItemId) {
+            if (!sortingTargetGroupId || sortingTargetGroupId === UNGROUPED_ID) delete store.assignments[sortingItemId];
+            else store.assignments[sortingItemId] = sortingTargetGroupId;
+            saveStore();
+          }
+
           const changed = syncAssignmentsFromRenderedLayout(listEl);
           const result = originalStop ? originalStop.apply(this, args) : undefined;
 
@@ -649,6 +630,8 @@
             .catch(() => {})
             .finally(() => {
               sorting = false;
+              sortingItemId = '';
+              sortingTargetGroupId = undefined;
               schedule(() => {
                 if (changed) renderTree();
                 else startListObserver(getListEl());
@@ -678,7 +661,6 @@
         name,
         order: store.groups.length + 1
       });
-      lastRenderedGroupSignature = '';
       saveStore();
       renderTree();
     }
@@ -691,7 +673,6 @@
       if (!nextName) return;
 
       group.name = nextName;
-      lastRenderedGroupSignature = '';
       saveStore();
       renderTree();
     }
@@ -708,28 +689,8 @@
         if (assignedGroupId === groupId) delete store.assignments[itemId];
       }
       delete store.collapsed[groupId];
-      lastRenderedGroupSignature = '';
       saveStore();
       renderTree();
-    }
-
-    function assignSelected(targetGroupId) {
-      const selected = getSelectedItemIds();
-      if (selected.length < 1) {
-        toast('请先勾选要移动的正则', 'warning');
-        return false;
-      }
-
-      for (const itemId of selected) {
-        if (!targetGroupId || targetGroupId === UNGROUPED_ID) delete store.assignments[itemId];
-        else store.assignments[itemId] = targetGroupId;
-      }
-
-      toast(targetGroupId === UNGROUPED_ID ? '已移动到未分组' : '已移动到目标分组');
-      selectedItemIds.clear();
-      saveStore();
-      renderTree();
-      return true;
     }
 
     function renderTree() {
@@ -743,15 +704,11 @@
         const items = collectItems(listEl);
         migrateLegacyAssignments(items);
         cleanupAssignments(items);
-        syncSelectedIdsWithItems(items);
 
         renderGroupedList(items);
         syncNativeSortableOptions(listEl);
         bindNativeSortableEvents(listEl);
-        populateGroupSelect(headerEl.querySelector(`#${GROUP_SELECT_ID}`));
         renderGroupManager(headerEl.querySelector('.st-rmg-group-manager'));
-        syncSelectionUI(items);
-        updateSelectedCount();
       } finally {
         rendering = false;
         startListObserver(listEl);
@@ -759,10 +716,6 @@
     }
 
     function bindHeaderEvents(headerEl) {
-      headerEl.addEventListener('click', (e) => {
-        if (e.target?.closest?.('.st-rmg-script-entry')) e.stopPropagation();
-      });
-
       const panelToggleEl = headerEl.querySelector('[data-st-rmg-panel-toggle]');
       panelToggleEl?.addEventListener('click', (e) => {
         e.preventDefault();
@@ -777,34 +730,12 @@
         togglePanelCollapsed();
       });
 
-      headerEl.addEventListener('change', (e) => {
-        if (e.target?.classList?.contains('st-rmg-script-check')) {
-          const itemId = String(e.target.value || '');
-          if (itemId) {
-            if (e.target.checked) selectedItemIds.add(itemId);
-            else selectedItemIds.delete(itemId);
-          }
-          updateSelectedCount();
-          return;
-        }
-
-      });
-
       headerEl.addEventListener('click', (e) => {
         const addBtn = e.target?.closest?.(`#${NEW_GROUP_ID}`);
         if (addBtn) {
           e.preventDefault();
           e.stopPropagation();
           addGroup();
-          return;
-        }
-
-        const moveBtn = e.target?.closest?.(`#${MOVE_ID}`);
-        if (moveBtn) {
-          e.preventDefault();
-          e.stopPropagation();
-          const selectEl = headerEl.querySelector(`#${GROUP_SELECT_ID}`);
-          assignSelected(selectEl?.value || UNGROUPED_ID);
           return;
         }
 
@@ -876,16 +807,12 @@
               <span class="st-rmg-panel-arrow" data-st-rmg-panel-arrow>▼</span>
               <b>${escapeHtml(titleText)}分组</b>
             </div>
-            <span class="st-rmg-selected-count">已选 0</span>
           </div>
           <div class="st-rmg-panel-body">
             <div class="st-rmg-toolbar">
               <button type="button" class="menu_button interactable" id="${NEW_GROUP_ID}">新增分组</button>
-              <select id="${GROUP_SELECT_ID}" class="text_pole st-rmg-select"></select>
-              <button type="button" class="menu_button interactable" id="${MOVE_ID}">移动到组</button>
             </div>
             <div class="st-rmg-group-manager"></div>
-            <div class="st-rmg-script-list" id="${SCRIPT_LIST_ID}"></div>
           </div>
         `;
         blockEl.insertAdjacentElement('afterbegin', headerEl);

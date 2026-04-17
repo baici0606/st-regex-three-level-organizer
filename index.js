@@ -206,6 +206,7 @@
     const HEADER_ID = `${MODULE_NAME}-${scope}-header`;
     const TREE_ID = `${MODULE_NAME}-${scope}-tree`;
     const SELECT_ID = `${MODULE_NAME}-${scope}-select`;
+    const TARGETS_ID = `${MODULE_NAME}-${scope}-targets`;
     const NEW_ROOT_ID = `${MODULE_NAME}-${scope}-new-root`;
     const ASSIGN_ID = `${MODULE_NAME}-${scope}-assign`;
     const UNGROUP_ID = `${MODULE_NAME}-${scope}-ungroup`;
@@ -320,6 +321,38 @@
       selectEl.value = nextValue;
     }
 
+    function renderTargetButtons(containerEl, roots, byId) {
+      if (!containerEl) return;
+
+      const buttons = [];
+
+      function pushNode(node, depth) {
+        buttons.push(`
+          <button
+            type="button"
+            class="menu_button interactable st-rmg-target-btn"
+            data-group-target="${escapeHtml(node.id)}"
+            data-depth="${depth}"
+            title="分配到 ${escapeHtml(getFullPath(node.id, byId))}"
+          >${escapeHtml(getFullPath(node.id, byId))}</button>
+        `);
+
+        for (const child of node.children) {
+          pushNode(child, depth + 1);
+        }
+      }
+
+      buttons.push(`
+        <button type="button" class="menu_button interactable st-rmg-target-btn st-rmg-target-ungrouped" data-group-target="${UNGROUPED_ID}" data-depth="1" title="移到未分组">未分组</button>
+      `);
+
+      for (const root of roots) {
+        pushNode(root, 1);
+      }
+
+      containerEl.innerHTML = buttons.join('');
+    }
+
     function updateSelectedCount() {
       const headerEl = getHeaderEl();
       if (!headerEl) return;
@@ -422,6 +455,9 @@
 
         const selectEl = headerEl.querySelector(`#${SELECT_ID}`);
         populateGroupSelect(selectEl, roots, byId);
+
+        const targetsEl = headerEl.querySelector(`#${TARGETS_ID}`);
+        renderTargetButtons(targetsEl, roots, byId);
 
         syncSelectionUI(items);
         updateSelectedCount();
@@ -552,6 +588,14 @@
         e.stopPropagation();
         renderTree();
       });
+
+      headerEl.addEventListener('click', (e) => {
+        const targetBtn = e.target?.closest?.('[data-group-target]');
+        if (!targetBtn) return;
+        e.preventDefault();
+        e.stopPropagation();
+        assignSelected(String(targetBtn.dataset.groupTarget || UNGROUPED_ID));
+      });
     }
 
     function bindListEvents(listEl) {
@@ -630,6 +674,7 @@
             <button type="button" class="menu_button interactable" id="${UNGROUP_ID}">移出分组</button>
             <button type="button" class="menu_button interactable" id="${REFRESH_ID}">刷新分组</button>
           </div>
+          <div class="st-rmg-targets" id="${TARGETS_ID}"></div>
           <div class="st-rmg-script-list" id="${TREE_ID}"></div>
         `;
         blockEl.insertAdjacentElement('afterbegin', headerEl);

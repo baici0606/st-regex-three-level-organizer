@@ -6,6 +6,8 @@
   const UNGROUPED_ID = '__ungrouped__';
   const GROUPING_CLASS = 'st-rmg-grouping';
   const HIDDEN_CLASS = 'st-rmg-hidden';
+  const FOLDER_LABEL = '文件夹';
+  const UNGROUPED_LABEL = '未分组';
 
   function log(...args) {
     console.log(`[${MODULE_NAME}]`, ...args);
@@ -177,7 +179,7 @@
     const groups = rawGroups
       .map((group, index) => ({
         id: String(group?.id || uid('group')),
-        name: normalizeName(group?.name) || '未命名分组',
+        name: normalizeName(group?.name) || `未命名${FOLDER_LABEL}`,
         order: Number.isFinite(group?.order) ? Number(group.order) : index
       }))
       .slice(0, 500);
@@ -256,6 +258,10 @@
     let sorting = false;
     let sortingItemId = '';
     let sortingTargetGroupId = undefined;
+    let draggingFolderId = '';
+    let folderDropTargetId = '';
+    let folderDropAfter = false;
+    let lastFolderDragEndedAt = 0;
     let lastRenderedGroupSignature = '';
     let selectedGroupId = UNGROUPED_ID;
     let panelCollapsed = !!loadJson(PANEL_COLLAPSED_KEY, false);
@@ -315,18 +321,18 @@
     function validateGroupName(name, excludeGroupId = '') {
       const normalized = normalizeName(name);
       if (!normalized) {
-        toast('分组名称不能为空', 'warning');
+        toast(`${FOLDER_LABEL}名称不能为空`, 'warning');
         return '';
       }
 
-      if (normalized === '未分组') {
-        toast('“未分组”是保留名称，不能使用', 'warning');
+      if (normalized === UNGROUPED_LABEL) {
+        toast(`“${UNGROUPED_LABEL}”是保留名称，不能使用`, 'warning');
         return '';
       }
 
       const duplicate = findGroupByNormalizedName(normalized, excludeGroupId);
       if (duplicate) {
-        toast('已存在同名分组', 'warning');
+        toast(`已存在同名${FOLDER_LABEL}`, 'warning');
         return '';
       }
 
@@ -413,7 +419,7 @@
       const titleEl = headerEl.querySelector('[data-st-rmg-panel-toggle]');
       if (titleEl) {
         titleEl.setAttribute('aria-expanded', panelCollapsed ? 'false' : 'true');
-        titleEl.setAttribute('title', panelCollapsed ? '点击展开分组面板' : '点击收起分组面板');
+        titleEl.setAttribute('title', panelCollapsed ? `点击展开${FOLDER_LABEL}面板` : `点击收起${FOLDER_LABEL}面板`);
       }
     }
 
@@ -450,7 +456,7 @@
 
       const ungroupedOption = document.createElement('option');
       ungroupedOption.value = UNGROUPED_ID;
-      ungroupedOption.textContent = '未分组';
+      ungroupedOption.textContent = UNGROUPED_LABEL;
       selectEl.appendChild(ungroupedOption);
 
       for (const group of groups) {
@@ -471,9 +477,9 @@
       if (!containerEl) return;
       containerEl.innerHTML = `
         <div class="st-rmg-group-actions">
-          <button type="button" class="menu_button interactable" id="${NEW_GROUP_ID}">新增分组</button>
-          <button type="button" class="menu_button interactable" id="${RENAME_GROUP_ID}">重命名分组</button>
-          <button type="button" class="menu_button interactable st-rmg-danger" id="${DELETE_GROUP_ID}">删除分组</button>
+          <button type="button" class="menu_button interactable" id="${NEW_GROUP_ID}">新增${FOLDER_LABEL}</button>
+          <button type="button" class="menu_button interactable" id="${RENAME_GROUP_ID}">重命名${FOLDER_LABEL}</button>
+          <button type="button" class="menu_button interactable st-rmg-danger" id="${DELETE_GROUP_ID}">删除${FOLDER_LABEL}</button>
         </div>
         <select id="${GROUP_SELECT_ID}" class="text_pole st-rmg-group-select"></select>
       `;
@@ -522,6 +528,10 @@
         const header = document.createElement('div');
         header.className = 'st-rmg-group-header';
         header.dataset.groupId = groupId;
+        if (groupId !== UNGROUPED_ID) {
+          header.draggable = true;
+          header.classList.add('st-rmg-folder-draggable');
+        }
         header.innerHTML = `
           <span class="st-rmg-group-arrow">${store.collapsed[groupId] ? '▶' : '▼'}</span>
           <span class="st-rmg-group-name">${escapeHtml(title)}</span>
@@ -543,7 +553,7 @@
         fragment.appendChild(item.el);
       }
 
-      pushHeader(UNGROUPED_ID, '未分组', itemsByGroup.get(UNGROUPED_ID).length);
+      pushHeader(UNGROUPED_ID, UNGROUPED_LABEL, itemsByGroup.get(UNGROUPED_ID).length);
       for (const item of itemsByGroup.get(UNGROUPED_ID)) {
         pushItem(item, !!store.collapsed[UNGROUPED_ID]);
       }
@@ -692,6 +702,50 @@
       return undefined;
     }
 
+    function getFolderHeaderByGroupId(listEl, groupId) {
+      if (!listEl || !groupId) return null;
+      return Array.from(listEl.querySelectorAll('.st-rmg-group-header')).find((headerEl) => headerEl.dataset.groupId === groupId) || null;
+    }
+
+    function clearFolderDropIndicators(listEl = getListEl()) {
+      if (!listEl) return;
+      for (const headerEl of listEl.querySelectorAll('.st-rmg-group-header')) {
+        headerEl.classList.remove('st-rmg-folder-dragging', 'st-rmg-folder-drop-before', 'st-rmg-folder-drop-after');
+      }
+    }
+
+    function updateFolderDropIndicator(listEl, targetGroupId, placeAfter) {
+      clearFolderDropIndicators(listEl);
+
+      if (draggingFolderId) {
+        getFolderHeaderByGroupId(listEl, draggingFolderId)?.classList.add('st-rmg-folder-dragging');
+      }
+
+      if (!targetGroupId) return;
+      const targetHeaderEl = getFolderHeaderByGroupId(listEl, targetGroupId);
+      if (!targetHeaderEl) return;
+      targetHeaderEl.classList.add(placeAfter ? 'st-rmg-folder-drop-after' : 'st-rmg-folder-drop-before');
+    }
+
+    function reorderFolders(draggedGroupId, targetGroupId, placeAfter) {
+      if (!draggedGroupId || !targetGroupId || draggedGroupId === targetGroupId) return false;
+
+      const orderedGroups = getGroups().map((group) => ({ ...group }));
+      const draggedIndex = orderedGroups.findIndex((group) => group.id === draggedGroupId);
+      if (draggedIndex < 0) return false;
+
+      const [draggedGroup] = orderedGroups.splice(draggedIndex, 1);
+      const targetIndex = orderedGroups.findIndex((group) => group.id === targetGroupId);
+      if (targetIndex < 0) return false;
+
+      const insertIndex = targetIndex + (placeAfter ? 1 : 0);
+      orderedGroups.splice(insertIndex, 0, draggedGroup);
+      store.groups = orderedGroups.map((group, index) => ({ ...group, order: index + 1 }));
+      saveStore();
+      renderTree();
+      return true;
+    }
+
     function bindNativeSortableEvents(listEl = getListEl()) {
       const $ = getJQuery();
       if (!listEl || typeof $ !== 'function' || !$.fn?.sortable) return;
@@ -765,7 +819,7 @@
     }
 
     async function addGroup() {
-      const name = validateGroupName(await openPrompt('输入分组名称，例如 A组 / B组'));
+      const name = validateGroupName(await openPrompt(`输入${FOLDER_LABEL}名称，例如 A文件夹 / B文件夹`));
       if (!name) return;
 
       store.groups.push({
@@ -781,7 +835,7 @@
       const group = store.groups.find((entry) => entry.id === groupId);
       if (!group) return;
 
-      const nextName = validateGroupName(await openPrompt('输入新的分组名称', group.name), group.id);
+      const nextName = validateGroupName(await openPrompt(`输入新的${FOLDER_LABEL}名称`, group.name), group.id);
       if (!nextName) return;
 
       group.name = nextName;
@@ -793,7 +847,7 @@
       const group = store.groups.find((entry) => entry.id === groupId);
       if (!group) return;
 
-      const ok = await openConfirm(`删除分组“${group.name}”后，该组中的正则会回到未分组，是否继续？`);
+      const ok = await openConfirm(`删除${FOLDER_LABEL}“${group.name}”后，该${FOLDER_LABEL}中的正则会回到${UNGROUPED_LABEL}，是否继续？`);
       if (!ok) return;
 
       store.groups = store.groups.filter((entry) => entry.id !== groupId);
@@ -885,6 +939,12 @@
         const headerEl = e.target?.closest?.('.st-rmg-group-header');
         if (!headerEl) return;
 
+        if (Date.now() - lastFolderDragEndedAt < 250) {
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
+
         e.preventDefault();
         e.stopPropagation();
 
@@ -892,6 +952,75 @@
         store.collapsed[groupId] = !store.collapsed[groupId];
         saveStore();
         renderTree();
+      });
+
+      listEl.addEventListener('dragstart', (e) => {
+        const headerEl = e.target?.closest?.('.st-rmg-group-header.st-rmg-folder-draggable');
+        if (!headerEl) return;
+
+        draggingFolderId = String(headerEl.dataset.groupId || '');
+        folderDropTargetId = '';
+        folderDropAfter = false;
+        updateFolderDropIndicator(listEl, '', false);
+
+        try {
+          e.dataTransfer?.setData?.('text/plain', draggingFolderId);
+          if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+        } catch {
+          // ignore
+        }
+      });
+
+      listEl.addEventListener('dragover', (e) => {
+        if (!draggingFolderId) return;
+
+        const targetHeaderEl = e.target?.closest?.('.st-rmg-group-header.st-rmg-folder-draggable');
+        if (!targetHeaderEl) {
+          updateFolderDropIndicator(listEl, '', false);
+          return;
+        }
+
+        const targetGroupId = String(targetHeaderEl.dataset.groupId || '');
+        if (!targetGroupId || targetGroupId === draggingFolderId) {
+          updateFolderDropIndicator(listEl, '', false);
+          return;
+        }
+
+        e.preventDefault();
+        const rect = targetHeaderEl.getBoundingClientRect();
+        const placeAfter = Number(e.clientY) > rect.top + rect.height / 2;
+        folderDropTargetId = targetGroupId;
+        folderDropAfter = placeAfter;
+        updateFolderDropIndicator(listEl, targetGroupId, placeAfter);
+
+        try {
+          if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+        } catch {
+          // ignore
+        }
+      });
+
+      listEl.addEventListener('drop', (e) => {
+        if (!draggingFolderId) return;
+        if (!folderDropTargetId || folderDropTargetId === draggingFolderId) return;
+
+        e.preventDefault();
+        e.stopPropagation();
+        lastFolderDragEndedAt = Date.now();
+        clearFolderDropIndicators(listEl);
+        reorderFolders(draggingFolderId, folderDropTargetId, folderDropAfter);
+        draggingFolderId = '';
+        folderDropTargetId = '';
+        folderDropAfter = false;
+      });
+
+      listEl.addEventListener('dragend', () => {
+        if (!draggingFolderId) return;
+        lastFolderDragEndedAt = Date.now();
+        draggingFolderId = '';
+        folderDropTargetId = '';
+        folderDropAfter = false;
+        clearFolderDropIndicators(listEl);
       });
     }
 
@@ -926,7 +1055,7 @@
           <div class="st-rmg-title-row st-rmg-panel-toggle" data-st-rmg-panel-toggle role="button" tabindex="0" aria-expanded="true">
             <div class="st-rmg-title-main">
               <span class="st-rmg-panel-arrow" data-st-rmg-panel-arrow>▼</span>
-              <b>${escapeHtml(titleText)}分组</b>
+              <b>${escapeHtml(titleText)}${FOLDER_LABEL}</b>
             </div>
           </div>
           <div class="st-rmg-panel-body">

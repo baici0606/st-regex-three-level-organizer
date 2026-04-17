@@ -102,6 +102,22 @@
   cursor: pointer;
 }
 
+.st-rmg-folder-draggable {
+  cursor: grab;
+}
+
+.st-rmg-folder-dragging {
+  opacity: 0.6;
+}
+
+.st-rmg-folder-drop-before {
+  box-shadow: inset 0 2px 0 rgba(120, 200, 255, 0.9);
+}
+
+.st-rmg-folder-drop-after {
+  box-shadow: inset 0 -2px 0 rgba(120, 200, 255, 0.9);
+}
+
 .st-rmg-sort-anchor {
   display: block;
   min-height: 3px;

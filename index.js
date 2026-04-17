@@ -569,21 +569,60 @@
       }
     }
 
+    function movePlaceholderIntoHoveredGroup(listEl, event, ui) {
+      const placeholderEl = ui?.placeholder?.[0];
+      if (!placeholderEl || typeof document.elementFromPoint !== 'function') return;
+
+      const clientX = Number(event?.clientX);
+      const clientY = Number(event?.clientY);
+      if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return;
+
+      const hoveredEl = document.elementFromPoint(clientX, clientY);
+      const headerEl = hoveredEl?.closest?.('.st-rmg-group-header');
+      if (!headerEl || headerEl.parentElement !== listEl) return;
+      if (placeholderEl.previousElementSibling === headerEl) return;
+
+      headerEl.insertAdjacentElement('afterend', placeholderEl);
+    }
+
     function bindNativeSortableEvents(listEl = getListEl()) {
       const $ = getJQuery();
       if (!listEl || typeof $ !== 'function' || !$.fn?.sortable) return;
 
       try {
         const sortable = $(listEl);
-        if (!sortable.sortable('instance')) return;
+        const instance = sortable.sortable('instance');
+        if (!instance) return;
 
-        sortable.off('sortstop.stRmg').on('sortstop.stRmg', () => {
-          schedule(() => {
-            if (syncAssignmentsFromRenderedLayout(listEl)) {
+        const currentSort = sortable.sortable('option', 'sort');
+        const currentStop = sortable.sortable('option', 'stop');
+        if (currentSort === listEl.__stRmgWrappedSort && currentStop === listEl.__stRmgWrappedStop) return;
+
+        const originalSort = typeof currentSort === 'function' ? currentSort : null;
+        const originalStop = typeof currentStop === 'function' ? currentStop : null;
+
+        const wrappedSort = function (event, ui) {
+          movePlaceholderIntoHoveredGroup(listEl, event, ui);
+          return originalSort ? originalSort.call(this, event, ui) : undefined;
+        };
+
+        const wrappedStop = function (...args) {
+          const changed = syncAssignmentsFromRenderedLayout(listEl);
+          const result = originalStop ? originalStop.apply(this, args) : undefined;
+
+          if (changed) {
+            schedule(() => {
               renderTree();
-            }
-          });
-        });
+            });
+          }
+
+          return result;
+        };
+
+        listEl.__stRmgWrappedSort = wrappedSort;
+        listEl.__stRmgWrappedStop = wrappedStop;
+        sortable.sortable('option', 'sort', wrappedSort);
+        sortable.sortable('option', 'stop', wrappedStop);
       } catch {
         // ignore
       }

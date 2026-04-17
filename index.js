@@ -233,6 +233,10 @@
     let lastRenderedGroupSignature = '';
     let panelCollapsed = !!loadJson(PANEL_COLLAPSED_KEY, false);
 
+    function pauseListObserver() {
+      if (listObserver) listObserver.disconnect();
+    }
+
     function saveStore() {
       store = sanitizeStore(store);
       saveJson(STORAGE_KEY, store);
@@ -311,10 +315,13 @@
     function cleanupAssignments(items) {
       const validItemIds = new Set(items.map((item) => item.id));
       const validGroupIds = new Set(store.groups.map((group) => group.id));
+      const shouldPruneMissingItems = scope === 'global' && items.length > 0;
       let changed = false;
 
       for (const [itemId, groupId] of Object.entries(store.assignments)) {
-        if (!validItemIds.has(itemId) || (groupId && !validGroupIds.has(groupId))) {
+        const missingInCurrentView = !validItemIds.has(itemId);
+        const invalidGroup = groupId && !validGroupIds.has(groupId);
+        if ((shouldPruneMissingItems && missingInCurrentView) || invalidGroup) {
           delete store.assignments[itemId];
           changed = true;
         }
@@ -467,7 +474,7 @@
       }
 
       for (const child of Array.from(listEl.children)) {
-        if (child.classList.contains('st-rmg-group-header')) child.remove();
+        if (child.classList.contains('st-rmg-group-header') || child.classList.contains('st-rmg-sort-anchor')) child.remove();
       }
 
       listEl.classList.add(GROUPING_CLASS);
@@ -561,6 +568,26 @@
       }
     }
 
+    function bindNativeSortableEvents(listEl = getListEl()) {
+      const $ = getJQuery();
+      if (!listEl || typeof $ !== 'function' || !$.fn?.sortable) return;
+
+      try {
+        const sortable = $(listEl);
+        if (!sortable.sortable('instance')) return;
+
+        sortable.off('sortstop.stRmg').on('sortstop.stRmg', () => {
+          schedule(() => {
+            if (syncAssignmentsFromRenderedLayout(listEl)) {
+              renderTree();
+            }
+          });
+        });
+      } catch {
+        // ignore
+      }
+    }
+
     async function addGroup() {
       const name = normalizeName(await openPrompt('输入分组名称，例如 A组 / B组'));
       if (!name) return;
@@ -629,6 +656,7 @@
       const listEl = getListEl();
       if (!headerEl || !listEl) return;
 
+      pauseListObserver();
       rendering = true;
       try {
         const items = collectItems(listEl);
@@ -638,12 +666,14 @@
 
         renderGroupedList(items);
         syncNativeSortableOptions(listEl);
+        bindNativeSortableEvents(listEl);
         populateGroupSelect(headerEl.querySelector(`#${GROUP_SELECT_ID}`));
         renderGroupManager(headerEl.querySelector('.st-rmg-group-manager'));
         syncSelectionUI(items);
         updateSelectedCount();
       } finally {
         rendering = false;
+        startListObserver(listEl);
       }
     }
 
@@ -730,20 +760,6 @@
         saveStore();
         renderTree();
       });
-
-      const $ = getJQuery();
-      if (typeof $ === 'function' && $.fn?.sortable) {
-        try {
-          const sortable = $(listEl);
-          sortable.off('sortstop.stRmg').on('sortstop.stRmg', () => {
-            if (syncAssignmentsFromRenderedLayout(listEl)) {
-              renderTree();
-            }
-          });
-        } catch {
-          // ignore
-        }
-      }
     }
 
     function startListObserver(listEl) {
@@ -797,7 +813,6 @@
 
       applyPanelCollapsedState(headerEl);
       bindListEvents(listEl);
-      startListObserver(listEl);
       renderTree();
       return true;
     }
@@ -840,6 +855,7 @@
 
     eventSource?.on?.(event_types.APP_READY, ensureAll);
     if (event_types?.SETTINGS_LOADED) eventSource?.on?.(event_types.SETTINGS_LOADED, ensureAll);
+    if (event_types?.CHAT_CHANGED) eventSource?.on?.(event_types.CHAT_CHANGED, ensureAll);
     if (event_types?.PRESET_CHANGED) eventSource?.on?.(event_types.PRESET_CHANGED, ensureAll);
 
     ensureAll();

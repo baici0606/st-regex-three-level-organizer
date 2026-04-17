@@ -146,7 +146,11 @@
 
   function getDirectScriptItems(listEl) {
     if (!listEl?.children) return [];
-    return Array.from(listEl.children).filter((el) => el?.classList?.contains('regex-script-label'));
+    return Array.from(listEl.children).filter((el) => el?.classList?.contains('regex-script-label') && !el.classList?.contains('st-rmg-sort-anchor'));
+  }
+
+  function getJQuery() {
+    return window.jQuery || window.$ || null;
   }
 
   function createDefaultStore() {
@@ -467,7 +471,7 @@
       }
 
       listEl.classList.add(GROUPING_CLASS);
-      let order = 0;
+      const fragment = document.createDocumentFragment();
 
       function pushHeader(groupId, title, count) {
         const header = document.createElement('div');
@@ -478,13 +482,20 @@
           <span class="st-rmg-group-name">${escapeHtml(title)}</span>
           <span class="st-rmg-group-count">(${count})</span>
         `;
-        listEl.appendChild(header);
-        header.style.order = String(order++);
+        fragment.appendChild(header);
+
+        const anchor = document.createElement('div');
+        anchor.className = 'regex-script-label st-rmg-sort-anchor';
+        anchor.id = `st-rmg-anchor-${scope}-${groupId}`;
+        anchor.dataset.groupId = groupId;
+        anchor.setAttribute('aria-hidden', 'true');
+        fragment.appendChild(anchor);
       }
 
       function pushItem(item, hidden) {
         item.el.classList.toggle(HIDDEN_CLASS, hidden);
-        item.el.style.order = String(order++);
+        item.el.style.removeProperty('order');
+        fragment.appendChild(item.el);
       }
 
       pushHeader(UNGROUPED_ID, '未分组', itemsByGroup.get(UNGROUPED_ID).length);
@@ -498,6 +509,55 @@
         for (const item of groupItems) {
           pushItem(item, !!store.collapsed[group.id]);
         }
+      }
+
+      listEl.appendChild(fragment);
+    }
+
+    function syncAssignmentsFromRenderedLayout(listEl = getListEl()) {
+      if (!listEl) return false;
+
+      const validGroupIds = new Set(store.groups.map((group) => group.id));
+      let currentGroupId = UNGROUPED_ID;
+      let changed = false;
+
+      for (const child of Array.from(listEl.children)) {
+        if (child.classList?.contains('st-rmg-group-header')) {
+          const groupId = String(child.dataset.groupId || UNGROUPED_ID);
+          currentGroupId = groupId === UNGROUPED_ID || validGroupIds.has(groupId) ? groupId : UNGROUPED_ID;
+          continue;
+        }
+
+        if (child.classList?.contains('st-rmg-sort-anchor')) continue;
+        if (!child.classList?.contains('regex-script-label')) continue;
+
+        const itemId = getItemId(child);
+        const nextGroupId = currentGroupId === UNGROUPED_ID ? null : currentGroupId;
+        const previousGroupId = store.assignments[itemId] ?? null;
+        if (previousGroupId === nextGroupId) continue;
+
+        if (nextGroupId === null) delete store.assignments[itemId];
+        else store.assignments[itemId] = nextGroupId;
+        changed = true;
+      }
+
+      if (changed) saveStore();
+      return changed;
+    }
+
+    function syncNativeSortableOptions(listEl = getListEl()) {
+      const $ = getJQuery();
+      if (!listEl || typeof $ !== 'function' || !$.fn?.sortable) return;
+
+      try {
+        const sortable = $(listEl);
+        if (!sortable.sortable('instance')) return;
+
+        sortable.sortable('option', 'items', '> .regex-script-label');
+        sortable.sortable('option', 'cancel', '.st-rmg-group-header');
+        sortable.sortable('refresh');
+      } catch {
+        // ignore
       }
     }
 
@@ -577,6 +637,7 @@
         syncSelectedIdsWithItems(items);
 
         renderGroupedList(items);
+        syncNativeSortableOptions(listEl);
         populateGroupSelect(headerEl.querySelector(`#${GROUP_SELECT_ID}`));
         renderGroupManager(headerEl.querySelector('.st-rmg-group-manager'));
         syncSelectionUI(items);
@@ -669,6 +730,20 @@
         saveStore();
         renderTree();
       });
+
+      const $ = getJQuery();
+      if (typeof $ === 'function' && $.fn?.sortable) {
+        try {
+          const sortable = $(listEl);
+          sortable.off('sortstop.stRmg').on('sortstop.stRmg', () => {
+            if (syncAssignmentsFromRenderedLayout(listEl)) {
+              renderTree();
+            }
+          });
+        } catch {
+          // ignore
+        }
+      }
     }
 
     function startListObserver(listEl) {

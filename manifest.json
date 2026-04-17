@@ -1,10 +1,10 @@
 {
   "name": "st-regex-three-level-organizer",
-  "display_name": "酒馆正则分组整理器",
+  "display_name": "正则分组管理器",
   "loading_order": 95,
   "js": "index.js",
   "css": "style.css",
   "author": "Baici",
-  "version": "0.1.1",
+  "version": "1.0",
   "description": "A SillyTavern frontend plugin for organizing global, preset, and scoped regex scripts into manual groups while preserving native regex drag sorting."
 }

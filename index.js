@@ -233,6 +233,7 @@
     let sortingItemId = '';
     let sortingTargetGroupId = undefined;
     let lastRenderedGroupSignature = '';
+    let selectedGroupId = UNGROUPED_ID;
     let panelCollapsed = !!loadJson(PANEL_COLLAPSED_KEY, false);
 
     function pauseListObserver() {
@@ -368,7 +369,7 @@
       if (!selectEl) return;
 
       const nextSignature = getGroupSignature();
-      const previousValue = selectEl.value || UNGROUPED_ID;
+      const previousValue = selectedGroupId || UNGROUPED_ID;
 
       if (lastRenderedGroupSignature === nextSignature && selectEl.options.length > 0) {
         const stillExists = Array.from(selectEl.options).some((option) => option.value === previousValue);
@@ -394,6 +395,7 @@
       selectEl.value = Array.from(selectEl.options).some((option) => option.value === previousValue)
         ? previousValue
         : UNGROUPED_ID;
+      selectedGroupId = selectEl.value || UNGROUPED_ID;
       lastRenderedGroupSignature = nextSignature;
     }
 
@@ -418,7 +420,7 @@
       if (!containerEl) return;
 
       const selectEl = containerEl.querySelector(`#${GROUP_SELECT_ID}`);
-      const selectedGroupId = String(selectEl?.value || UNGROUPED_ID);
+      selectedGroupId = String(selectEl?.value || UNGROUPED_ID);
       const canEditGroup = selectedGroupId !== UNGROUPED_ID && getGroups().some((group) => group.id === selectedGroupId);
       const renameBtn = containerEl.querySelector(`#${RENAME_GROUP_ID}`);
       const deleteBtn = containerEl.querySelector(`#${DELETE_GROUP_ID}`);

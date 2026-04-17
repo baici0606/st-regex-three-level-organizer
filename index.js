@@ -508,6 +508,16 @@
 
         for (const [snapshotGroupId, snapshot] of Object.entries(nextSnapshots)) {
           if (!Object.prototype.hasOwnProperty.call(snapshot, item.id)) continue;
+
+          if (snapshotGroupId !== groupId) {
+            delete snapshot[item.id];
+            storeChanged = true;
+            if (Object.keys(snapshot).length < 1) {
+              delete nextSnapshots[snapshotGroupId];
+            }
+            continue;
+          }
+
           desiredDisabledByItemId.set(item.id, !!snapshot[item.id]);
           delete snapshot[item.id];
           storeChanged = true;

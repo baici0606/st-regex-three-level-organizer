@@ -756,8 +756,11 @@
         }
         const folderState = getFolderState(groupId, items);
         const toggleTitle = folderState === STATE_DISABLED ? `启用${FOLDER_LABEL}` : `关闭${FOLDER_LABEL}`;
+        if (folderState === STATE_DISABLED) {
+          header.classList.add('st-rmg-folder-disabled');
+        }
         header.innerHTML = `
-          <span class="st-rmg-group-arrow">${store.collapsed[groupId] ? '▶' : '▼'}</span>
+          <span class="st-rmg-folder-handle" draggable="true" title="拖动排序" aria-label="拖动排序">&#8801;&#8801;</span>
           <span class="st-rmg-group-name">${escapeHtml(title)}</span>
           <span class="st-rmg-group-count">(${count})</span>
           <button type="button" class="st-rmg-folder-switch ${folderState === STATE_DISABLED ? 'is-off' : 'is-on'}" data-folder-toggle="${escapeHtml(groupId)}" title="${escapeHtml(toggleTitle)}" aria-pressed="${folderState === STATE_DISABLED ? 'false' : 'true'}">
@@ -765,6 +768,7 @@
               <span class="st-rmg-folder-switch-thumb"></span>
             </span>
           </button>
+          <span class="st-rmg-group-arrow">${store.collapsed[groupId] ? '▶' : '▼'}</span>
         `;
         fragment.appendChild(header);
 
@@ -1196,7 +1200,10 @@
       });
 
       listEl.addEventListener('dragstart', (e) => {
-        const headerEl = e.target?.closest?.('.st-rmg-group-header.st-rmg-folder-draggable');
+        const handleEl = e.target?.closest?.('.st-rmg-folder-handle');
+        if (!handleEl) return;
+
+        const headerEl = handleEl.closest('.st-rmg-group-header.st-rmg-folder-draggable');
         if (!headerEl) return;
 
         draggingFolderId = String(headerEl.dataset.groupId || '');

@@ -163,9 +163,10 @@
 }
 
 .st-rmg-sort-anchor {
-  min-height: 6px;
-  height: 6px;
-  margin: 0;
+  display: block;
+  min-height: 22px;
+  height: 22px;
+  margin: -2px 0 2px;
   padding: 0;
   border: 0;
   opacity: 0;

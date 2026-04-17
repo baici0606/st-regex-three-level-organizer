@@ -560,8 +560,9 @@
         const sortable = $(listEl);
         if (!sortable.sortable('instance')) return;
 
-        sortable.sortable('option', 'items', '> .regex-script-label');
+        sortable.sortable('option', 'items', '> .regex-script-label:not(.st-rmg-hidden), > .st-rmg-sort-anchor');
         sortable.sortable('option', 'cancel', '.st-rmg-group-header');
+        sortable.sortable('option', 'tolerance', 'pointer');
         sortable.sortable('refresh');
       } catch {
         // ignore

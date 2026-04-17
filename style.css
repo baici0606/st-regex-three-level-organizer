@@ -1,6 +1,6 @@
 .st-rmg-header {
-  margin-bottom: 6px;
-  padding: 8px;
+  margin-bottom: 4px;
+  padding: 6px;
   border: 1px solid var(--mainColor, rgba(255, 255, 255, 0.2));
   border-radius: 10px;
   background: var(--SmartThemeBlurTintColor, rgba(0, 0, 0, 0.25));
@@ -10,14 +10,14 @@
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 8px;
-  margin-bottom: 4px;
+  gap: 6px;
+  margin-bottom: 3px;
 }
 
 .st-rmg-panel-toggle {
   user-select: none;
   cursor: pointer;
-  padding: 2px 1px;
+  padding: 0;
   border-radius: 8px;
 }
 
@@ -28,7 +28,7 @@
 .st-rmg-title-main {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
 }
 
@@ -50,23 +50,27 @@
 .st-rmg-toolbar {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 3px;
   align-items: stretch;
-  margin-bottom: 2px;
+  margin-bottom: 1px;
 }
 
 .st-rmg-group-manager {
   display: grid;
   width: 100%;
-  gap: 4px;
+  gap: 2px;
 }
 
 .st-rmg-group-actions {
   display: flex;
   flex-wrap: nowrap;
-  gap: 4px;
+  gap: 3px;
   align-items: center;
-  overflow-x: auto;
+}
+
+.st-rmg-group-actions > .menu_button {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .st-rmg-group-select {
@@ -76,7 +80,7 @@
 
 .st-rmg-empty {
   opacity: 0.72;
-  padding: 4px 0;
+  padding: 2px 0;
 }
 
 #saved_regex_scripts.st-rmg-grouping,
@@ -89,7 +93,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 8px;
+  padding: 4px 8px;
   margin-top: 0;
   margin-bottom: 0;
   border-radius: 8px;
@@ -100,8 +104,8 @@
 
 .st-rmg-sort-anchor {
   display: block;
-  min-height: 4px;
-  height: 4px;
+  min-height: 3px;
+  height: 3px;
   margin: 0;
   padding: 0;
   border: 0;

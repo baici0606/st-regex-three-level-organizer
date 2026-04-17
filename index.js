@@ -751,7 +751,6 @@
         header.className = 'st-rmg-group-header';
         header.dataset.groupId = groupId;
         if (groupId !== UNGROUPED_ID) {
-          header.draggable = true;
           header.classList.add('st-rmg-folder-draggable');
         }
         const folderState = getFolderState(groupId, items);
@@ -768,7 +767,7 @@
               <span class="st-rmg-folder-switch-thumb"></span>
             </span>
           </button>
-          <span class="st-rmg-group-arrow">${store.collapsed[groupId] ? '▶' : '▼'}</span>
+          <span class="st-rmg-group-arrow">${store.collapsed[groupId] ? '>' : 'v'}</span>
         `;
         fragment.appendChild(header);
 
@@ -782,6 +781,8 @@
 
       function pushItem(item, hidden) {
         item.el.classList.toggle(HIDDEN_CLASS, hidden);
+        const groupId = store.assignments[item.id] || UNGROUPED_ID;
+        item.el.classList.toggle('st-rmg-folder-item-disabled', !!store.disabledFolders?.[groupId]);
         item.el.style.removeProperty('order');
         fragment.appendChild(item.el);
       }

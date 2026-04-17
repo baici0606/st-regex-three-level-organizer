@@ -114,6 +114,7 @@
   letter-spacing: -1px;
   cursor: grab;
   user-select: none;
+  padding-right: 2px;
 }
 
 .st-rmg-group-name {
@@ -200,6 +201,12 @@
   width: 16px;
   text-align: center;
   opacity: 0.75;
+  font-family: Consolas, monospace;
+}
+
+.st-rmg-folder-item-disabled {
+  opacity: 0.72;
+  filter: brightness(0.72);
 }
 
 .st-rmg-danger {

@@ -2,10 +2,10 @@
   'use strict';
 
   const MODULE_NAME = 'st-regex-manual-groups';
-  const HIDDEN_CLASS = 'st-rmg-hidden';
-  const GROUPING_CLASS = 'st-rmg-grouping';
+  const STORAGE_VERSION = 2;
   const UNGROUPED_ID = '__ungrouped__';
-  const STORAGE_VERSION = 1;
+  const GROUPING_CLASS = 'st-rmg-grouping';
+  const HIDDEN_CLASS = 'st-rmg-hidden';
 
   function log(...args) {
     console.log(`[${MODULE_NAME}]`, ...args);
@@ -16,11 +16,8 @@
   }
 
   function schedule(fn) {
-    if (typeof window.requestAnimationFrame === 'function') {
-      window.requestAnimationFrame(fn);
-    } else {
-      setTimeout(fn, 16);
-    }
+    if (typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(fn);
+    else setTimeout(fn, 16);
   }
 
   function getCtx() {
@@ -59,6 +56,10 @@
     log(message);
   }
 
+  function normalizeName(value) {
+    return String(value ?? '').trim();
+  }
+
   function escapeHtml(value) {
     return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
       '&': '&amp;',
@@ -71,10 +72,6 @@
 
   function uid(prefix = 'id') {
     return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-  }
-
-  function normalizeName(input) {
-    return String(input ?? '').trim();
   }
 
   function getScriptName(itemEl) {
@@ -114,20 +111,21 @@
 
   function sanitizeStore(raw) {
     const source = raw && typeof raw === 'object' ? raw : {};
-    const groups = Array.isArray(source.groups) ? source.groups : [];
+    const rawGroups = Array.isArray(source.groups) ? source.groups : [];
     const assignments = source.assignments && typeof source.assignments === 'object' ? source.assignments : {};
     const collapsed = source.collapsed && typeof source.collapsed === 'object' ? source.collapsed : {};
 
+    const groups = rawGroups
+      .map((group, index) => ({
+        id: String(group?.id || uid('group')),
+        name: normalizeName(group?.name) || '未命名分组',
+        order: Number.isFinite(group?.order) ? Number(group.order) : index
+      }))
+      .slice(0, 500);
+
     return {
       version: STORAGE_VERSION,
-      groups: groups
-        .map((group) => ({
-          id: String(group?.id || uid('group')),
-          name: normalizeName(group?.name) || '未命名分组',
-          parentId: group?.parentId ? String(group.parentId) : null,
-          order: Number.isFinite(group?.order) ? Number(group.order) : 0
-        }))
-        .slice(0, 500),
+      groups,
       assignments: Object.fromEntries(
         Object.entries(assignments)
           .filter(([key, value]) => !!key && (typeof value === 'string' || value === null))
@@ -141,44 +139,8 @@
     };
   }
 
-  function buildTree(groups) {
-    const byId = new Map();
-    const roots = [];
-
-    for (const group of groups) {
-      byId.set(group.id, { ...group, children: [] });
-    }
-
-    for (const group of groups.slice().sort((a, b) => a.order - b.order || a.name.localeCompare(b.name, 'zh-Hans-CN'))) {
-      const node = byId.get(group.id);
-      const parent = group.parentId ? byId.get(group.parentId) : null;
-      if (parent) parent.children.push(node);
-      else roots.push(node);
-    }
-
-    return { byId, roots };
-  }
-
-  function getNodeDepth(groupId, byId) {
-    let depth = 1;
-    let current = byId.get(groupId);
-    while (current?.parentId) {
-      depth += 1;
-      current = byId.get(current.parentId);
-      if (depth > 10) break;
-    }
-    return depth;
-  }
-
-  function getFullPath(groupId, byId) {
-    if (!groupId || groupId === UNGROUPED_ID) return '未分组';
-    const parts = [];
-    let current = byId.get(groupId);
-    while (current) {
-      parts.unshift(current.name);
-      current = current.parentId ? byId.get(current.parentId) : null;
-    }
-    return parts.join(' / ');
+  function getSortedGroups(groups) {
+    return groups.slice().sort((a, b) => a.order - b.order || a.name.localeCompare(b.name, 'zh-Hans-CN'));
   }
 
   function openPrompt(title, defaultValue = '') {
@@ -204,11 +166,11 @@
   function createPanelController({ scope, blockId, listId, titleText }) {
     const STORAGE_KEY = `${MODULE_NAME}:${scope}:store`;
     const HEADER_ID = `${MODULE_NAME}-${scope}-header`;
-    const TREE_ID = `${MODULE_NAME}-${scope}-tree`;
-    const SELECT_ID = `${MODULE_NAME}-${scope}-select`;
+    const GROUP_SELECT_ID = `${MODULE_NAME}-${scope}-select`;
+    const SCRIPT_LIST_ID = `${MODULE_NAME}-${scope}-script-list`;
     const TARGETS_ID = `${MODULE_NAME}-${scope}-targets`;
-    const NEW_ROOT_ID = `${MODULE_NAME}-${scope}-new-root`;
-    const ASSIGN_ID = `${MODULE_NAME}-${scope}-assign`;
+    const NEW_GROUP_ID = `${MODULE_NAME}-${scope}-new-group`;
+    const MOVE_ID = `${MODULE_NAME}-${scope}-move`;
     const UNGROUP_ID = `${MODULE_NAME}-${scope}-ungroup`;
     const REFRESH_ID = `${MODULE_NAME}-${scope}-refresh`;
 
@@ -235,6 +197,10 @@
       return document.getElementById(HEADER_ID);
     }
 
+    function getGroups() {
+      return getSortedGroups(store.groups);
+    }
+
     function collectItems(listEl = getListEl()) {
       return getDirectScriptItems(listEl).map((itemEl, index) => ({
         el: itemEl,
@@ -244,55 +210,49 @@
       }));
     }
 
-    function cleanupOrphanAssignments(items, byId) {
+    function syncSelectedIdsWithItems(items) {
+      const validIds = new Set(items.map((item) => item.id));
+      selectedItemIds = new Set(Array.from(selectedItemIds).filter((itemId) => validIds.has(itemId)));
+    }
+
+    function cleanupAssignments(items) {
       const validItemIds = new Set(items.map((item) => item.id));
-      const validGroupIds = new Set(byId.keys());
+      const validGroupIds = new Set(store.groups.map((group) => group.id));
       let changed = false;
+
       for (const [itemId, groupId] of Object.entries(store.assignments)) {
         if (!validItemIds.has(itemId) || (groupId && !validGroupIds.has(groupId))) {
           delete store.assignments[itemId];
           changed = true;
         }
       }
-      if (changed) saveStore();
-    }
 
-    function removeGroupAndChildren(groupId) {
-      const { byId } = buildTree(store.groups);
-      const toDelete = new Set();
-      const walk = (id) => {
-        toDelete.add(id);
-        for (const group of store.groups) {
-          if (group.parentId === id) walk(group.id);
-        }
-      };
-      walk(groupId);
-      store.groups = store.groups.filter((group) => !toDelete.has(group.id));
-      for (const [itemId, assignedGroupId] of Object.entries(store.assignments)) {
-        if (assignedGroupId && toDelete.has(assignedGroupId)) {
-          delete store.assignments[itemId];
+      for (const groupId of Object.keys(store.collapsed)) {
+        if (groupId !== UNGROUPED_ID && !validGroupIds.has(groupId)) {
+          delete store.collapsed[groupId];
+          changed = true;
         }
       }
-      for (const deletedId of toDelete) {
-        delete store.collapsed[deletedId];
-      }
-      saveStore();
-      return byId;
+
+      if (changed) saveStore();
     }
 
     function getSelectedItemIds() {
       return Array.from(selectedItemIds);
     }
 
-    function syncSelectedIdsWithItems(items) {
-      const validIds = new Set(items.map((item) => item.id));
-      selectedItemIds = new Set(Array.from(selectedItemIds).filter((itemId) => validIds.has(itemId)));
+    function updateSelectedCount() {
+      const headerEl = getHeaderEl();
+      if (!headerEl) return;
+      const badge = headerEl.querySelector('.st-rmg-selected-count');
+      if (badge) badge.textContent = `已选 ${selectedItemIds.size}`;
     }
 
-    function populateGroupSelect(selectEl, roots, byId) {
+    function populateGroupSelect(selectEl) {
       if (!selectEl) return;
 
       const previousValue = selectEl.value;
+      const groups = getGroups();
       selectEl.innerHTML = '';
 
       const ungroupedOption = document.createElement('option');
@@ -300,19 +260,11 @@
       ungroupedOption.textContent = '未分组';
       selectEl.appendChild(ungroupedOption);
 
-      function appendNodeOption(node, depth) {
+      for (const group of groups) {
         const optionEl = document.createElement('option');
-        optionEl.value = node.id;
-        optionEl.textContent = `${' '.repeat(Math.max(0, depth - 1) * 4)}${getFullPath(node.id, byId)}`;
+        optionEl.value = group.id;
+        optionEl.textContent = group.name;
         selectEl.appendChild(optionEl);
-
-        for (const child of node.children) {
-          appendNodeOption(child, depth + 1);
-        }
-      }
-
-      for (const root of roots) {
-        appendNodeOption(root, 1);
       }
 
       const nextValue = Array.from(selectEl.options).some((option) => option.value === previousValue)
@@ -321,190 +273,125 @@
       selectEl.value = nextValue;
     }
 
-    function renderTargetButtons(containerEl, roots, byId) {
+    function renderTargetButtons(containerEl) {
       if (!containerEl) return;
+      const groups = getGroups();
 
-      const buttons = [];
-
-      function pushNode(node, depth) {
-        buttons.push(`
-          <button
-            type="button"
-            class="menu_button interactable st-rmg-target-btn"
-            data-group-target="${escapeHtml(node.id)}"
-            data-depth="${depth}"
-            title="分配到 ${escapeHtml(getFullPath(node.id, byId))}"
-          >${escapeHtml(getFullPath(node.id, byId))}</button>
-        `);
-
-        for (const child of node.children) {
-          pushNode(child, depth + 1);
-        }
-      }
-
-      buttons.push(`
-        <button type="button" class="menu_button interactable st-rmg-target-btn st-rmg-target-ungrouped" data-group-target="${UNGROUPED_ID}" data-depth="1" title="移到未分组">未分组</button>
-      `);
-
-      for (const root of roots) {
-        pushNode(root, 1);
-      }
-
-      containerEl.innerHTML = buttons.join('');
+      containerEl.innerHTML = [
+        `<button type="button" class="menu_button interactable st-rmg-target-btn st-rmg-target-ungrouped" data-group-target="${UNGROUPED_ID}">未分组</button>`
+      ]
+        .concat(
+          groups.map(
+            (group) => `<button type="button" class="menu_button interactable st-rmg-target-btn" data-group-target="${escapeHtml(group.id)}">${escapeHtml(group.name)}</button>`
+          )
+        )
+        .join('');
     }
 
-    function updateSelectedCount() {
-      const headerEl = getHeaderEl();
-      if (!headerEl) return;
-      const count = selectedItemIds.size;
-      const badge = headerEl.querySelector('.st-rmg-selected-count');
-      if (badge) badge.textContent = `已选 ${count}`;
-    }
+    function renderGroupManager(containerEl) {
+      if (!containerEl) return;
+      const groups = getGroups();
 
-    function renderTree() {
-      const headerEl = getHeaderEl();
-      const listEl = getListEl();
-      if (!headerEl || !listEl) return;
-
-      rendering = true;
-
-      try {
-        const items = collectItems(listEl);
-        const { byId, roots } = buildTree(store.groups);
-        cleanupOrphanAssignments(items, byId);
-
-        syncSelectedIdsWithItems(items);
-
-        const itemsByGroup = new Map();
-        itemsByGroup.set(UNGROUPED_ID, []);
-        for (const group of store.groups) {
-          itemsByGroup.set(group.id, []);
-        }
-
-        for (const item of items) {
-          const groupId = store.assignments[item.id];
-          if (groupId && itemsByGroup.has(groupId)) itemsByGroup.get(groupId).push(item);
-          else itemsByGroup.get(UNGROUPED_ID).push(item);
-        }
-
-        listEl.classList.add(GROUPING_CLASS);
-
-        for (const child of Array.from(listEl.children)) {
-          if (child.classList.contains('st-rmg-group-header')) child.remove();
-        }
-
-        let order = 0;
-
-        function pushHeader(groupId, title, depth, count) {
-          const header = document.createElement('div');
-          header.className = 'st-rmg-group-header';
-          header.dataset.groupId = groupId;
-          header.dataset.depth = String(depth);
-          header.innerHTML = `
-            <span class="st-rmg-group-arrow">${store.collapsed[groupId] ? '▶' : '▼'}</span>
-            <span class="st-rmg-group-name">${escapeHtml(title)}</span>
-            <span class="st-rmg-group-count">(${count})</span>
-            ${groupId === UNGROUPED_ID ? '' : '<button type="button" class="menu_button interactable st-rmg-mini" data-action="add-child" title="新增子组">+</button><button type="button" class="menu_button interactable st-rmg-mini" data-action="rename" title="重命名组">改名</button><button type="button" class="menu_button interactable st-rmg-mini st-rmg-danger" data-action="delete" title="删除组">删</button>'}
-          `;
-          listEl.appendChild(header);
-          header.style.order = String(order++);
-        }
-
-        function pushItem(item, depth, hidden) {
-          item.el.dataset.stRmgAssignedGroup = store.assignments[item.id] || '';
-          item.el.dataset.stRmgDepth = String(depth);
-          item.el.classList.toggle(HIDDEN_CLASS, !!hidden);
-          item.el.style.order = String(order++);
-        }
-
-        function renderNode(node, depth, parentHidden) {
-          const childItems = itemsByGroup.get(node.id) || [];
-          let total = childItems.length;
-          for (const child of node.children) {
-            total += countSubtree(child);
-          }
-
-          pushHeader(node.id, node.name, depth, total);
-
-          const collapsed = !!store.collapsed[node.id];
-          const hidden = parentHidden || collapsed;
-
-          for (const item of childItems) {
-            pushItem(item, depth, hidden);
-          }
-
-          for (const child of node.children) {
-            renderNode(child, depth + 1, hidden);
-          }
-        }
-
-        function countSubtree(node) {
-          let count = (itemsByGroup.get(node.id) || []).length;
-          for (const child of node.children) count += countSubtree(child);
-          return count;
-        }
-
-        pushHeader(UNGROUPED_ID, '未分组', 1, (itemsByGroup.get(UNGROUPED_ID) || []).length);
-        for (const item of itemsByGroup.get(UNGROUPED_ID) || []) {
-          pushItem(item, 1, false);
-        }
-
-        for (const root of roots) {
-          renderNode(root, 1, false);
-        }
-
-        const selectEl = headerEl.querySelector(`#${SELECT_ID}`);
-        populateGroupSelect(selectEl, roots, byId);
-
-        const targetsEl = headerEl.querySelector(`#${TARGETS_ID}`);
-        renderTargetButtons(targetsEl, roots, byId);
-
-        syncSelectionUI(items);
-        updateSelectedCount();
-      } finally {
-        rendering = false;
-      }
+      containerEl.innerHTML = groups.length
+        ? groups
+            .map(
+              (group) => `
+                <div class="st-rmg-group-chip">
+                  <span class="st-rmg-group-chip-name">${escapeHtml(group.name)}</span>
+                  <button type="button" class="menu_button interactable st-rmg-chip-btn" data-group-rename="${escapeHtml(group.id)}" title="重命名分组">改名</button>
+                  <button type="button" class="menu_button interactable st-rmg-chip-btn st-rmg-danger" data-group-delete="${escapeHtml(group.id)}" title="删除分组">删</button>
+                </div>
+              `
+            )
+            .join('')
+        : '<div class="st-rmg-empty">还没有分组，先创建一个组。</div>';
     }
 
     function syncSelectionUI(items = collectItems()) {
       const headerEl = getHeaderEl();
       if (!headerEl) return;
 
-      const container = headerEl.querySelector('.st-rmg-script-list');
+      const container = headerEl.querySelector(`#${SCRIPT_LIST_ID}`);
       if (!container) return;
 
       container.innerHTML = items
         .map((item) => {
-          const assigned = store.assignments[item.id];
-          const label = assigned ? getFullPath(assigned, buildTree(store.groups).byId) : '未分组';
+          const assignedGroupId = store.assignments[item.id];
+          const assignedGroup = store.groups.find((group) => group.id === assignedGroupId);
           const checked = selectedItemIds.has(item.id) ? 'checked' : '';
           return `
             <label class="st-rmg-script-entry" title="${escapeHtml(item.name)}">
               <input type="checkbox" class="st-rmg-script-check" value="${escapeHtml(item.id)}" ${checked}>
               <span class="st-rmg-script-entry-name">${escapeHtml(item.name || '(未命名正则)')}</span>
-              <span class="st-rmg-script-entry-path">${escapeHtml(label)}</span>
+              <span class="st-rmg-script-entry-path">${escapeHtml(assignedGroup?.name || '未分组')}</span>
             </label>
           `;
         })
         .join('');
     }
 
-    async function addGroup(parentId = null) {
-      const { byId } = buildTree(store.groups);
-      if (parentId && getNodeDepth(parentId, byId) >= 3) {
-        toast('最多只支持三级分组', 'warning');
-        return;
+    function renderGroupedList(items) {
+      const listEl = getListEl();
+      if (!listEl) return;
+
+      const groups = getGroups();
+      const itemsByGroup = new Map();
+      itemsByGroup.set(UNGROUPED_ID, []);
+      for (const group of groups) itemsByGroup.set(group.id, []);
+
+      for (const item of items) {
+        const groupId = store.assignments[item.id];
+        if (groupId && itemsByGroup.has(groupId)) itemsByGroup.get(groupId).push(item);
+        else itemsByGroup.get(UNGROUPED_ID).push(item);
       }
 
-      const name = normalizeName(await openPrompt(parentId ? '输入子分组名称' : '输入一级分组名称'));
+      for (const child of Array.from(listEl.children)) {
+        if (child.classList.contains('st-rmg-group-header')) child.remove();
+      }
+
+      listEl.classList.add(GROUPING_CLASS);
+      let order = 0;
+
+      function pushHeader(groupId, title, count) {
+        const header = document.createElement('div');
+        header.className = 'st-rmg-group-header';
+        header.dataset.groupId = groupId;
+        header.innerHTML = `
+          <span class="st-rmg-group-arrow">${store.collapsed[groupId] ? '▶' : '▼'}</span>
+          <span class="st-rmg-group-name">${escapeHtml(title)}</span>
+          <span class="st-rmg-group-count">(${count})</span>
+        `;
+        listEl.appendChild(header);
+        header.style.order = String(order++);
+      }
+
+      function pushItem(item, hidden) {
+        item.el.classList.toggle(HIDDEN_CLASS, hidden);
+        item.el.style.order = String(order++);
+      }
+
+      pushHeader(UNGROUPED_ID, '未分组', itemsByGroup.get(UNGROUPED_ID).length);
+      for (const item of itemsByGroup.get(UNGROUPED_ID)) {
+        pushItem(item, !!store.collapsed[UNGROUPED_ID]);
+      }
+
+      for (const group of groups) {
+        const groupItems = itemsByGroup.get(group.id) || [];
+        pushHeader(group.id, group.name, groupItems.length);
+        for (const item of groupItems) {
+          pushItem(item, !!store.collapsed[group.id]);
+        }
+      }
+    }
+
+    async function addGroup() {
+      const name = normalizeName(await openPrompt('输入分组名称，例如 A组 / B组'));
       if (!name) return;
 
-      const siblings = store.groups.filter((group) => String(group.parentId || '') === String(parentId || ''));
       store.groups.push({
         id: uid('group'),
         name,
-        parentId,
-        order: siblings.length + 1
+        order: store.groups.length + 1
       });
       saveStore();
       renderTree();
@@ -513,27 +400,35 @@
     async function renameGroup(groupId) {
       const group = store.groups.find((entry) => entry.id === groupId);
       if (!group) return;
+
       const nextName = normalizeName(await openPrompt('输入新的分组名称', group.name));
       if (!nextName) return;
+
       group.name = nextName;
       saveStore();
       renderTree();
     }
 
     async function deleteGroup(groupId) {
-      const { byId } = buildTree(store.groups);
-      const group = byId.get(groupId);
+      const group = store.groups.find((entry) => entry.id === groupId);
       if (!group) return;
-      const ok = await openConfirm(`删除分组“${group.name}”及其所有子分组后，组内脚本会回到未分组，是否继续？`);
+
+      const ok = await openConfirm(`删除分组“${group.name}”后，该组中的正则会回到未分组，是否继续？`);
       if (!ok) return;
-      removeGroupAndChildren(groupId);
+
+      store.groups = store.groups.filter((entry) => entry.id !== groupId);
+      for (const [itemId, assignedGroupId] of Object.entries(store.assignments)) {
+        if (assignedGroupId === groupId) delete store.assignments[itemId];
+      }
+      delete store.collapsed[groupId];
+      saveStore();
       renderTree();
     }
 
     function assignSelected(targetGroupId) {
       const selected = getSelectedItemIds();
       if (selected.length < 1) {
-        toast('请先勾选要分组的正则', 'warning');
+        toast('请先勾选要移动的正则', 'warning');
         return false;
       }
 
@@ -549,10 +444,31 @@
       return true;
     }
 
+    function renderTree() {
+      const headerEl = getHeaderEl();
+      const listEl = getListEl();
+      if (!headerEl || !listEl) return;
+
+      rendering = true;
+      try {
+        const items = collectItems(listEl);
+        cleanupAssignments(items);
+        syncSelectedIdsWithItems(items);
+
+        renderGroupedList(items);
+        populateGroupSelect(headerEl.querySelector(`#${GROUP_SELECT_ID}`));
+        renderTargetButtons(headerEl.querySelector(`#${TARGETS_ID}`));
+        renderGroupManager(headerEl.querySelector('.st-rmg-group-manager'));
+        syncSelectionUI(items);
+        updateSelectedCount();
+      } finally {
+        rendering = false;
+      }
+    }
+
     function bindHeaderEvents(headerEl) {
       headerEl.addEventListener('click', (e) => {
-        if (!e.target?.closest?.('.st-rmg-script-entry')) return;
-        e.stopPropagation();
+        if (e.target?.closest?.('.st-rmg-script-entry')) e.stopPropagation();
       });
 
       headerEl.addEventListener('change', (e) => {
@@ -563,49 +479,72 @@
             else selectedItemIds.delete(itemId);
           }
           updateSelectedCount();
+          return;
+        }
+
+        if (e.target?.id === GROUP_SELECT_ID) {
+          e.preventDefault();
+          e.stopPropagation();
+          assignSelected(String(e.target.value || UNGROUPED_ID));
         }
       });
 
-      headerEl.querySelector(`#${NEW_ROOT_ID}`)?.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        addGroup(null);
-      });
-
-      headerEl.querySelector(`#${ASSIGN_ID}`)?.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const selectEl = headerEl.querySelector(`#${SELECT_ID}`);
-        assignSelected(selectEl?.value || UNGROUPED_ID);
-      });
-
-      headerEl.querySelector(`#${SELECT_ID}`)?.addEventListener('change', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-
-        const targetGroupId = String(e.target?.value || UNGROUPED_ID);
-        const moved = assignSelected(targetGroupId);
-        if (!moved) return;
-      });
-
-      headerEl.querySelector(`#${UNGROUP_ID}`)?.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        assignSelected(UNGROUPED_ID);
-      });
-
-      headerEl.querySelector(`#${REFRESH_ID}`)?.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        renderTree();
-      });
-
       headerEl.addEventListener('click', (e) => {
+        const addBtn = e.target?.closest?.(`#${NEW_GROUP_ID}`);
+        if (addBtn) {
+          e.preventDefault();
+          e.stopPropagation();
+          addGroup();
+          return;
+        }
+
+        const moveBtn = e.target?.closest?.(`#${MOVE_ID}`);
+        if (moveBtn) {
+          e.preventDefault();
+          e.stopPropagation();
+          const selectEl = headerEl.querySelector(`#${GROUP_SELECT_ID}`);
+          assignSelected(selectEl?.value || UNGROUPED_ID);
+          return;
+        }
+
+        const ungroupBtn = e.target?.closest?.(`#${UNGROUP_ID}`);
+        if (ungroupBtn) {
+          e.preventDefault();
+          e.stopPropagation();
+          assignSelected(UNGROUPED_ID);
+          return;
+        }
+
+        const refreshBtn = e.target?.closest?.(`#${REFRESH_ID}`);
+        if (refreshBtn) {
+          e.preventDefault();
+          e.stopPropagation();
+          renderTree();
+          return;
+        }
+
         const targetBtn = e.target?.closest?.('[data-group-target]');
-        if (!targetBtn) return;
-        e.preventDefault();
-        e.stopPropagation();
-        assignSelected(String(targetBtn.dataset.groupTarget || UNGROUPED_ID));
+        if (targetBtn) {
+          e.preventDefault();
+          e.stopPropagation();
+          assignSelected(String(targetBtn.dataset.groupTarget || UNGROUPED_ID));
+          return;
+        }
+
+        const renameBtn = e.target?.closest?.('[data-group-rename]');
+        if (renameBtn) {
+          e.preventDefault();
+          e.stopPropagation();
+          renameGroup(String(renameBtn.dataset.groupRename || ''));
+          return;
+        }
+
+        const deleteBtn = e.target?.closest?.('[data-group-delete]');
+        if (deleteBtn) {
+          e.preventDefault();
+          e.stopPropagation();
+          deleteGroup(String(deleteBtn.dataset.groupDelete || ''));
+        }
       });
     }
 
@@ -617,28 +556,10 @@
         const headerEl = e.target?.closest?.('.st-rmg-group-header');
         if (!headerEl) return;
 
-        const groupId = headerEl.dataset.groupId;
-        const action = e.target?.dataset?.action;
-
         e.preventDefault();
         e.stopPropagation();
 
-        if (action === 'add-child') {
-          addGroup(groupId);
-          return;
-        }
-
-        if (action === 'rename') {
-          renameGroup(groupId);
-          return;
-        }
-
-        if (action === 'delete') {
-          deleteGroup(groupId);
-          return;
-        }
-
-        if (!groupId || groupId === UNGROUPED_ID) return;
+        const groupId = String(headerEl.dataset.groupId || UNGROUPED_ID);
         store.collapsed[groupId] = !store.collapsed[groupId];
         saveStore();
         renderTree();
@@ -651,8 +572,7 @@
 
       let scheduled = false;
       listObserver = new MutationObserver(() => {
-        if (rendering) return;
-        if (scheduled) return;
+        if (rendering || scheduled) return;
         scheduled = true;
         schedule(() => {
           scheduled = false;
@@ -675,18 +595,19 @@
         headerEl.className = 'st-rmg-header';
         headerEl.innerHTML = `
           <div class="st-rmg-title-row">
-            <b>${escapeHtml(titleText)}手动分组</b>
+            <b>${escapeHtml(titleText)}分组</b>
             <span class="st-rmg-selected-count">已选 0</span>
           </div>
           <div class="st-rmg-toolbar">
-            <button type="button" class="menu_button interactable" id="${NEW_ROOT_ID}">新增一级组</button>
-            <select id="${SELECT_ID}" class="text_pole st-rmg-select"></select>
-            <button type="button" class="menu_button interactable" id="${ASSIGN_ID}">分配到组</button>
-            <button type="button" class="menu_button interactable" id="${UNGROUP_ID}">移出分组</button>
-            <button type="button" class="menu_button interactable" id="${REFRESH_ID}">刷新分组</button>
+            <button type="button" class="menu_button interactable" id="${NEW_GROUP_ID}">新增分组</button>
+            <select id="${GROUP_SELECT_ID}" class="text_pole st-rmg-select"></select>
+            <button type="button" class="menu_button interactable" id="${MOVE_ID}">移动到组</button>
+            <button type="button" class="menu_button interactable" id="${UNGROUP_ID}">移到未分组</button>
+            <button type="button" class="menu_button interactable" id="${REFRESH_ID}">刷新</button>
           </div>
           <div class="st-rmg-targets" id="${TARGETS_ID}"></div>
-          <div class="st-rmg-script-list" id="${TREE_ID}"></div>
+          <div class="st-rmg-group-manager"></div>
+          <div class="st-rmg-script-list" id="${SCRIPT_LIST_ID}"></div>
         `;
         blockEl.insertAdjacentElement('afterbegin', headerEl);
         bindHeaderEvents(headerEl);
@@ -701,14 +622,17 @@
     function tryEnsure() {
       if (ensureMounted()) return;
       if (domObserver || typeof MutationObserver !== 'function') return;
+
       const root = document.body || document.documentElement;
       if (!root) return;
+
       domObserver = new MutationObserver(() => {
         if (ensureMounted() && domObserver) {
           domObserver.disconnect();
           domObserver = null;
         }
       });
+
       domObserver.observe(root, { childList: true, subtree: true });
     }
 
@@ -724,24 +648,9 @@
 
     const { eventSource, event_types } = ctx;
     const controllers = [
-      createPanelController({
-        scope: 'global',
-        blockId: 'global_scripts_block',
-        listId: 'saved_regex_scripts',
-        titleText: '全局正则'
-      }),
-      createPanelController({
-        scope: 'preset',
-        blockId: 'preset_scripts_block',
-        listId: 'saved_preset_scripts',
-        titleText: '预设正则'
-      }),
-      createPanelController({
-        scope: 'scoped',
-        blockId: 'scoped_scripts_block',
-        listId: 'saved_scoped_scripts',
-        titleText: '局部正则'
-      })
+      createPanelController({ scope: 'global', blockId: 'global_scripts_block', listId: 'saved_regex_scripts', titleText: '全局正则' }),
+      createPanelController({ scope: 'preset', blockId: 'preset_scripts_block', listId: 'saved_preset_scripts', titleText: '预设正则' }),
+      createPanelController({ scope: 'scoped', blockId: 'scoped_scripts_block', listId: 'saved_scoped_scripts', titleText: '局部正则' })
     ];
 
     const ensureAll = () => controllers.forEach((controller) => controller.tryEnsure());

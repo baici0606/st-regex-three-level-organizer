@@ -8,6 +8,8 @@
   const HIDDEN_CLASS = 'st-rmg-hidden';
   const FOLDER_LABEL = '文件夹';
   const UNGROUPED_LABEL = '未分组';
+  const STATE_ENABLED = 'enabled';
+  const STATE_DISABLED = 'disabled';
 
   function log(...args) {
     console.log(`[${MODULE_NAME}]`, ...args);
@@ -24,6 +26,16 @@
 
   function getCtx() {
     return window.SillyTavern?.getContext?.();
+  }
+
+  function getSelectedRegexPreset(ctx = getCtx()) {
+    const presets = ctx?.extensionSettings?.regex_presets;
+    if (!Array.isArray(presets)) return null;
+    return presets.find((preset) => preset?.isSelected) || null;
+  }
+
+  function getRegexPresetManager(ctx = getCtx()) {
+    return ctx?.getPresetManager?.('regex') || null;
   }
 
   function loadJson(key, fallback) {
@@ -228,8 +240,9 @@
     const ctx = getCtx();
 
     if (scope === 'preset') {
-      const apiId = window.getCurrentPresetAPI?.() ?? ctx?.getCurrentPresetAPI?.() ?? 'no-api';
-      const presetName = window.getCurrentPresetName?.() ?? ctx?.getCurrentPresetName?.() ?? 'no-preset';
+      const presetManager = getRegexPresetManager(ctx);
+      const apiId = presetManager?.apiId ?? 'no-api';
+      const presetName = presetManager?.getSelectedPresetName?.() ?? 'no-preset';
       return `preset:${keySegment(apiId, 'no-api')}:${keySegment(presetName, 'no-preset')}`;
     }
 
@@ -311,6 +324,102 @@
 
     function getGroups() {
       return getSortedGroups(store.groups);
+    }
+
+    function getFolderState(groupId, items = collectItems()) {
+      const folderItems = groupId === UNGROUPED_ID
+        ? items.filter((item) => !store.assignments[item.id])
+        : items.filter((item) => store.assignments[item.id] === groupId);
+
+      if (folderItems.length < 1) return STATE_ENABLED;
+
+      const disabledCount = folderItems.filter((item) => item.el?.querySelector?.('.disable_regex')?.checked).length;
+      return disabledCount === folderItems.length ? STATE_DISABLED : STATE_ENABLED;
+    }
+
+    function getScriptType() {
+      if (scope === 'global') return 0;
+      if (scope === 'scoped') return 1;
+      if (scope === 'preset') return 2;
+      return -1;
+    }
+
+    function getScriptsByCurrentScope(ctx = getCtx()) {
+      const scriptType = getScriptType();
+      if (scriptType === 0) return Array.isArray(ctx?.extensionSettings?.regex) ? ctx.extensionSettings.regex : [];
+      if (scriptType === 1) {
+        const character = ctx?.characters?.[ctx?.characterId];
+        const scopedScripts = character?.data?.extensions?.regex_scripts;
+        return Array.isArray(scopedScripts) ? scopedScripts : [];
+      }
+      if (scriptType === 2) {
+        const presetManager = getRegexPresetManager(ctx);
+        const presetScripts = presetManager?.readPresetExtensionField?.({ path: 'regex_scripts' });
+        return Array.isArray(presetScripts) ? presetScripts : [];
+      }
+      return [];
+    }
+
+    async function saveScriptsForCurrentScope(nextScripts, ctx = getCtx()) {
+      const scriptType = getScriptType();
+      if (scriptType === 0) {
+        if (ctx?.extensionSettings) ctx.extensionSettings.regex = nextScripts;
+        ctx?.saveSettingsDebounced?.();
+        return;
+      }
+
+      if (scriptType === 1) {
+        const characterId = ctx?.characterId;
+        if (characterId === undefined || typeof ctx?.writeExtensionField !== 'function') return;
+        await ctx.writeExtensionField(characterId, 'regex_scripts', nextScripts);
+        return;
+      }
+
+      if (scriptType === 2) {
+        const presetManager = getRegexPresetManager(ctx);
+        const presetName = presetManager?.getSelectedPresetName?.();
+        if (!presetManager || !presetName) return;
+        await presetManager.writePresetExtensionField({ name: presetName, path: 'regex_scripts', value: nextScripts });
+      }
+    }
+
+    async function reloadRegexUi(ctx = getCtx()) {
+      if (typeof window.loadRegexScripts === 'function') {
+        await window.loadRegexScripts();
+      }
+      const currentChatId = ctx?.getCurrentChatId?.();
+      if (currentChatId) {
+        await ctx?.reloadCurrentChat?.();
+      }
+    }
+
+    async function setFolderEnabled(groupId, enabled) {
+      const ctx = getCtx();
+      const items = collectItems();
+      const itemIds = new Set(
+        items
+          .filter((item) => (groupId === UNGROUPED_ID ? !store.assignments[item.id] : store.assignments[item.id] === groupId))
+          .map((item) => item.id)
+      );
+      if (itemIds.size < 1) return;
+
+      const currentScripts = getScriptsByCurrentScope(ctx);
+      if (!Array.isArray(currentScripts) || currentScripts.length < 1) return;
+
+      let changed = false;
+      const nextScripts = currentScripts.map((script) => {
+        if (!script?.id || !itemIds.has(`dom:${script.id}`)) return script;
+        const shouldDisable = !enabled;
+        if (!!script.disabled === shouldDisable) return script;
+        changed = true;
+        return { ...script, disabled: shouldDisable };
+      });
+
+      if (!changed) return;
+
+      await saveScriptsForCurrentScope(nextScripts, ctx);
+      await reloadRegexUi(ctx);
+      renderTree();
     }
 
     function findGroupByNormalizedName(name, excludeGroupId = '') {
@@ -524,6 +633,8 @@
       listEl.classList.add(GROUPING_CLASS);
       const fragment = document.createDocumentFragment();
 
+      const showUngrouped = (itemsByGroup.get(UNGROUPED_ID) || []).length > 0;
+
       function pushHeader(groupId, title, count) {
         const header = document.createElement('div');
         header.className = 'st-rmg-group-header';
@@ -532,10 +643,13 @@
           header.draggable = true;
           header.classList.add('st-rmg-folder-draggable');
         }
+        const folderState = getFolderState(groupId, items);
+        const toggleTitle = folderState === STATE_DISABLED ? `启用${FOLDER_LABEL}` : `关闭${FOLDER_LABEL}`;
         header.innerHTML = `
           <span class="st-rmg-group-arrow">${store.collapsed[groupId] ? '▶' : '▼'}</span>
           <span class="st-rmg-group-name">${escapeHtml(title)}</span>
           <span class="st-rmg-group-count">(${count})</span>
+          <button type="button" class="menu_button interactable st-rmg-folder-toggle ${folderState === STATE_DISABLED ? 'st-rmg-folder-toggle-off' : ''}" data-folder-toggle="${escapeHtml(groupId)}" title="${escapeHtml(toggleTitle)}">${folderState === STATE_DISABLED ? '已关闭' : '已开启'}</button>
         `;
         fragment.appendChild(header);
 
@@ -553,9 +667,11 @@
         fragment.appendChild(item.el);
       }
 
-      pushHeader(UNGROUPED_ID, UNGROUPED_LABEL, itemsByGroup.get(UNGROUPED_ID).length);
-      for (const item of itemsByGroup.get(UNGROUPED_ID)) {
-        pushItem(item, !!store.collapsed[UNGROUPED_ID]);
+      if (showUngrouped) {
+        pushHeader(UNGROUPED_ID, UNGROUPED_LABEL, itemsByGroup.get(UNGROUPED_ID).length);
+        for (const item of itemsByGroup.get(UNGROUPED_ID)) {
+          pushItem(item, !!store.collapsed[UNGROUPED_ID]);
+        }
       }
 
       for (const group of groups) {
@@ -936,6 +1052,16 @@
       listEl.dataset.stRmgBound = '1';
 
       listEl.addEventListener('click', (e) => {
+        const toggleBtn = e.target?.closest?.('[data-folder-toggle]');
+        if (toggleBtn) {
+          e.preventDefault();
+          e.stopPropagation();
+          const groupId = String(toggleBtn.dataset.folderToggle || UNGROUPED_ID);
+          const enabled = toggleBtn.classList.contains('st-rmg-folder-toggle-off');
+          setFolderEnabled(groupId, enabled);
+          return;
+        }
+
         const headerEl = e.target?.closest?.('.st-rmg-group-header');
         if (!headerEl) return;
 

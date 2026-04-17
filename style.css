@@ -102,6 +102,21 @@
   cursor: pointer;
 }
 
+.st-rmg-group-name {
+  min-width: 0;
+}
+
+.st-rmg-folder-toggle {
+  margin-left: auto;
+  min-width: 52px;
+  padding: 0 8px;
+  line-height: 1.6;
+}
+
+.st-rmg-folder-toggle-off {
+  color: #ffb0b0;
+}
+
 .st-rmg-folder-draggable {
   cursor: grab;
 }

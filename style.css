@@ -68,8 +68,21 @@
   align-items: center;
 }
 
+.st-rmg-transfer-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 3px;
+  align-items: center;
+}
+
 .st-rmg-group-actions > .menu_button {
   flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.st-rmg-transfer-actions > .menu_button {
+  flex: 1 1 0;
+  min-width: 0;
   white-space: nowrap;
 }
 
@@ -234,6 +247,11 @@
   .st-rmg-toolbar {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .st-rmg-group-actions,
+  .st-rmg-transfer-actions {
+    flex-wrap: wrap;
   }
 
 }

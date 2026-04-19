@@ -10,6 +10,9 @@
   const UNGROUPED_LABEL = '未分组';
   const STATE_ENABLED = 'enabled';
   const STATE_DISABLED = 'disabled';
+  const EXPORT_BUNDLE_TYPE = 'st-rmg-folder-bundle';
+  const EXPORT_BUNDLE_VERSION = 1;
+  const EXPORT_FILE_EXTENSION = '.st-regex-folder.json';
 
   function log(...args) {
     console.log(`[${MODULE_NAME}]`, ...args);
@@ -117,6 +120,14 @@
     const normalized = String(value ?? '').trim();
     if (!normalized) return fallback;
     return normalized.replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 120) || fallback;
+  }
+
+  function cloneJsonData(value, fallback = null) {
+    try {
+      return JSON.parse(JSON.stringify(value));
+    } catch {
+      return fallback;
+    }
   }
 
   function getScriptName(itemEl) {
@@ -308,6 +319,8 @@
     const NEW_GROUP_ID = `${MODULE_NAME}-${scope}-new-group`;
     const RENAME_GROUP_ID = `${MODULE_NAME}-${scope}-rename-group`;
     const DELETE_GROUP_ID = `${MODULE_NAME}-${scope}-delete-group`;
+    const EXPORT_GROUP_ID = `${MODULE_NAME}-${scope}-export-group`;
+    const IMPORT_GROUP_ID = `${MODULE_NAME}-${scope}-import-group`;
 
     let store = createDefaultStore();
     let currentStoreKey = '';
@@ -373,6 +386,10 @@
       return getSortedGroups(store.groups);
     }
 
+    function getGroupById(groupId) {
+      return store.groups.find((group) => group.id === groupId) || null;
+    }
+
     function getFolderState(groupId, items = collectItems()) {
       const folderItems = groupId === UNGROUPED_ID
         ? items.filter((item) => !store.assignments[item.id])
@@ -403,6 +420,26 @@
         return Array.isArray(presetScripts) ? presetScripts : [];
       }
       return [];
+    }
+
+    function getScriptsByItemId(currentScripts = getScriptsByCurrentScope()) {
+      return new Map(
+        currentScripts
+          .filter((script) => script && typeof script === 'object' && normalizeName(script.id))
+          .map((script) => {
+            const scriptId = normalizeName(script.id);
+            return [`dom:${scriptId}`, script];
+          })
+      );
+    }
+
+    function generateUniqueScriptId(existingIds) {
+      let nextId = '';
+      do {
+        nextId = uid('regex');
+      } while (existingIds.has(nextId));
+      existingIds.add(nextId);
+      return nextId;
     }
 
     async function saveScriptsForCurrentScope(nextScripts, ctx = getCtx()) {
@@ -445,8 +482,79 @@
         .map((item) => item.id);
     }
 
+    async function applyFolderDisabledState(groupId, enabled, items = collectItems()) {
+      const ctx = getCtx();
+      const currentScripts = getScriptsByCurrentScope(ctx);
+      if (!Array.isArray(currentScripts) || currentScripts.length < 1) return false;
+
+      const targetItemIds = getFolderItemIds(groupId, items);
+      if (targetItemIds.length < 1) {
+        if (store.disabledSnapshots?.[groupId]) {
+          delete store.disabledSnapshots[groupId];
+          return true;
+        }
+        return false;
+      }
+
+      const availableScriptsByItemId = getScriptsByItemId(currentScripts);
+      const availableTargetItemIds = new Set(targetItemIds.filter((itemId) => availableScriptsByItemId.has(itemId)));
+      const existingSnapshotSource = store.disabledSnapshots?.[groupId];
+      const existingSnapshot = existingSnapshotSource && typeof existingSnapshotSource === 'object' ? { ...existingSnapshotSource } : {};
+      const nextSnapshot = {};
+
+      let snapshotChanged = false;
+      for (const [itemId, value] of Object.entries(existingSnapshot)) {
+        if (availableTargetItemIds.has(itemId)) nextSnapshot[itemId] = !!value;
+        else snapshotChanged = true;
+      }
+
+      let scriptsChanged = false;
+      const nextScripts = currentScripts.map((script) => {
+        const scriptId = normalizeName(script?.id);
+        if (!scriptId) return script;
+
+        const itemId = `dom:${scriptId}`;
+        if (!availableTargetItemIds.has(itemId)) return script;
+
+        if (!enabled) {
+          if (!Object.prototype.hasOwnProperty.call(nextSnapshot, itemId)) {
+            nextSnapshot[itemId] = !!script.disabled;
+            snapshotChanged = true;
+          }
+
+          if (!!script.disabled) return script;
+          scriptsChanged = true;
+          return { ...script, disabled: true };
+        }
+
+        if (!Object.prototype.hasOwnProperty.call(nextSnapshot, itemId)) return script;
+
+        const nextDisabled = !!nextSnapshot[itemId];
+        delete nextSnapshot[itemId];
+        snapshotChanged = true;
+        if (!!script.disabled === nextDisabled) return script;
+        scriptsChanged = true;
+        return { ...script, disabled: nextDisabled };
+      });
+
+      const hadSnapshot = Object.prototype.hasOwnProperty.call(store.disabledSnapshots || {}, groupId);
+      if (Object.keys(nextSnapshot).length > 0) {
+        store.disabledSnapshots[groupId] = nextSnapshot;
+      } else if (hadSnapshot) {
+        delete store.disabledSnapshots[groupId];
+        snapshotChanged = true;
+      }
+
+      if (!scriptsChanged) return snapshotChanged;
+
+      await saveScriptsForCurrentScope(nextScripts, ctx);
+      await reloadRegexUi(ctx);
+      return true;
+    }
+
     async function setFolderEnabled(groupId, enabled) {
-      const itemIds = new Set(getFolderItemIds(groupId));
+      const items = collectItems();
+      const itemIds = new Set(getFolderItemIds(groupId, items));
       if (itemIds.size < 1) return;
 
       pendingViewportRestore = captureViewportState(getHeaderEl());
@@ -464,90 +572,9 @@
         delete store.disabledFolders[groupId];
       }
 
+      await applyFolderDisabledState(groupId, enabled, items);
       saveStore();
       await renderTree();
-    }
-
-    async function syncFolderDisableOverlay(items) {
-      const ctx = getCtx();
-      const currentScripts = getScriptsByCurrentScope(ctx);
-      if (!Array.isArray(currentScripts) || currentScripts.length < 1) return false;
-
-      const scriptsByItemId = new Map(
-        currentScripts
-          .filter((script) => !!script?.id)
-          .map((script) => [`dom:${script.id}`, script])
-      );
-
-      if (!store.disabledSnapshots || typeof store.disabledSnapshots !== 'object') {
-        store.disabledSnapshots = {};
-      }
-
-      const nextSnapshots = {};
-      for (const [groupId, snapshot] of Object.entries(store.disabledSnapshots)) {
-        nextSnapshots[groupId] = { ...snapshot };
-      }
-
-      let storeChanged = false;
-      const desiredDisabledByItemId = new Map();
-
-      for (const item of items) {
-        const groupId = store.assignments[item.id] || UNGROUPED_ID;
-        const currentScript = scriptsByItemId.get(item.id);
-        if (!currentScript) continue;
-
-        if (store.disabledFolders?.[groupId]) {
-          if (!nextSnapshots[groupId]) nextSnapshots[groupId] = {};
-          if (!Object.prototype.hasOwnProperty.call(nextSnapshots[groupId], item.id)) {
-            nextSnapshots[groupId][item.id] = !!currentScript.disabled;
-            storeChanged = true;
-          }
-          desiredDisabledByItemId.set(item.id, true);
-          continue;
-        }
-
-        for (const [snapshotGroupId, snapshot] of Object.entries(nextSnapshots)) {
-          if (!Object.prototype.hasOwnProperty.call(snapshot, item.id)) continue;
-
-          if (snapshotGroupId !== groupId) {
-            delete snapshot[item.id];
-            storeChanged = true;
-            if (Object.keys(snapshot).length < 1) {
-              delete nextSnapshots[snapshotGroupId];
-            }
-            continue;
-          }
-
-          desiredDisabledByItemId.set(item.id, !!snapshot[item.id]);
-          delete snapshot[item.id];
-          storeChanged = true;
-          if (Object.keys(snapshot).length < 1) {
-            delete nextSnapshots[snapshotGroupId];
-          }
-          break;
-        }
-      }
-
-      const nextScripts = currentScripts.map((script) => {
-        if (!script?.id) return script;
-        const itemId = `dom:${script.id}`;
-        const shouldDisable = desiredDisabledByItemId.get(itemId);
-        if (shouldDisable === undefined || !!script.disabled === shouldDisable) return script;
-        return { ...script, disabled: shouldDisable };
-      });
-
-      const scriptsChanged = nextScripts.some((script, index) => script !== currentScripts[index]);
-
-      if (storeChanged) {
-        store.disabledSnapshots = nextSnapshots;
-        saveStore();
-      }
-
-      if (!scriptsChanged) return false;
-
-      await saveScriptsForCurrentScope(nextScripts, ctx);
-      await reloadRegexUi(ctx);
-      return true;
     }
 
     function findGroupByNormalizedName(name, excludeGroupId = '') {
@@ -574,6 +601,414 @@
       }
 
       return normalized;
+    }
+
+    function getImportBaseGroupName(name) {
+      const normalized = normalizeName(name);
+      if (!normalized || normalized === UNGROUPED_LABEL) return `导入${FOLDER_LABEL}`;
+      return normalized;
+    }
+
+    function getUniqueGroupName(name) {
+      const baseName = getImportBaseGroupName(name);
+      if (!findGroupByNormalizedName(baseName)) return baseName;
+
+      let index = 1;
+      while (true) {
+        const candidate = index === 1 ? `${baseName}（导入）` : `${baseName}（导入${index}）`;
+        if (!findGroupByNormalizedName(candidate)) return candidate;
+        index += 1;
+      }
+    }
+
+    function buildExportFileName(groupName) {
+      return `${keySegment(groupName, 'regex-folder')}${EXPORT_FILE_EXTENSION}`;
+    }
+
+    function downloadTextFile(fileName, content, mimeType = 'application/json;charset=utf-8') {
+      if (typeof Blob !== 'function' || typeof URL?.createObjectURL !== 'function') {
+        throw new Error('当前环境不支持文件导出');
+      }
+
+      const blob = new Blob([content], { type: mimeType });
+      const objectUrl = URL.createObjectURL(blob);
+      const linkEl = document.createElement('a');
+      linkEl.href = objectUrl;
+      linkEl.download = fileName;
+      linkEl.style.display = 'none';
+      document.body.appendChild(linkEl);
+      linkEl.click();
+      linkEl.remove();
+      schedule(() => URL.revokeObjectURL(objectUrl));
+    }
+
+    async function pickImportFile() {
+      if (typeof window.showOpenFilePicker === 'function') {
+        try {
+          const [handle] = await window.showOpenFilePicker({
+            multiple: false,
+            types: [
+              {
+                description: '正则文件夹导出文件',
+                accept: {
+                  'application/json': ['.json', EXPORT_FILE_EXTENSION]
+                }
+              }
+            ]
+          });
+          return handle ? await handle.getFile() : null;
+        } catch {
+          return null;
+        }
+      }
+
+      return new Promise((resolve) => {
+        const inputEl = document.createElement('input');
+        let settled = false;
+
+        const cleanup = (file = null) => {
+          if (settled) return;
+          settled = true;
+          window.removeEventListener('focus', handleWindowFocus, true);
+          inputEl.remove();
+          resolve(file || null);
+        };
+
+        const handleWindowFocus = () => {
+          window.setTimeout(() => {
+            cleanup(inputEl.files?.[0] || null);
+          }, 300);
+        };
+
+        inputEl.type = 'file';
+        inputEl.accept = `${EXPORT_FILE_EXTENSION},application/json,.json`;
+        inputEl.style.display = 'none';
+        inputEl.addEventListener('change', () => cleanup(inputEl.files?.[0] || null), { once: true });
+        window.addEventListener('focus', handleWindowFocus, true);
+        document.body.appendChild(inputEl);
+        inputEl.click();
+      });
+    }
+
+    async function readFileText(file) {
+      if (!file) return '';
+      if (typeof file.text === 'function') return await file.text();
+
+      return await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result ?? '');
+        reader.onerror = () => reject(new Error('读取导入文件失败'));
+        reader.readAsText(file);
+      });
+    }
+
+    async function syncItemDisabledStateForAssignmentChange(itemId, previousGroupId, nextGroupId) {
+      const normalizedItemId = normalizeName(itemId);
+      if (!normalizedItemId || normalizedItemId === 'item:unknown') return false;
+
+      const ctx = getCtx();
+      const currentScripts = getScriptsByCurrentScope(ctx);
+      if (!Array.isArray(currentScripts) || currentScripts.length < 1) return false;
+
+      const normalizedPreviousGroupId = previousGroupId ? String(previousGroupId) : null;
+      const normalizedNextGroupId = nextGroupId ? String(nextGroupId) : null;
+      const previousFolderDisabled = !!store.disabledFolders?.[normalizedPreviousGroupId || UNGROUPED_ID];
+      const nextFolderDisabled = !!store.disabledFolders?.[normalizedNextGroupId || UNGROUPED_ID];
+
+      if (!previousFolderDisabled && !nextFolderDisabled) return false;
+
+      const scriptId = normalizedItemId.startsWith('dom:') ? normalizedItemId.slice(4) : '';
+      if (!scriptId) return false;
+
+      const scriptIndex = currentScripts.findIndex((script) => normalizeName(script?.id) === scriptId);
+      if (scriptIndex < 0) return false;
+
+      const currentScript = currentScripts[scriptIndex];
+      const nextScripts = currentScripts.slice();
+      const nextScript = { ...currentScript };
+      let scriptsChanged = false;
+      let storeChanged = false;
+
+      if (!store.disabledSnapshots || typeof store.disabledSnapshots !== 'object') {
+        store.disabledSnapshots = {};
+      }
+
+      const previousSnapshot = normalizedPreviousGroupId && store.disabledSnapshots?.[normalizedPreviousGroupId]
+        && typeof store.disabledSnapshots[normalizedPreviousGroupId] === 'object'
+        ? store.disabledSnapshots[normalizedPreviousGroupId]
+        : null;
+      const hadPreviousSnapshot = !!previousSnapshot && Object.prototype.hasOwnProperty.call(previousSnapshot, normalizedItemId);
+      const previousRecordedDisabled = hadPreviousSnapshot ? !!previousSnapshot[normalizedItemId] : !!currentScript.disabled;
+
+      if (previousFolderDisabled && previousSnapshot && hadPreviousSnapshot) {
+        delete previousSnapshot[normalizedItemId];
+        storeChanged = true;
+        if (Object.keys(previousSnapshot).length < 1 && normalizedPreviousGroupId) {
+          delete store.disabledSnapshots[normalizedPreviousGroupId];
+        }
+      }
+
+      if (nextFolderDisabled) {
+        if (!normalizedNextGroupId) return storeChanged;
+
+        if (!store.disabledSnapshots[normalizedNextGroupId] || typeof store.disabledSnapshots[normalizedNextGroupId] !== 'object') {
+          store.disabledSnapshots[normalizedNextGroupId] = {};
+          storeChanged = true;
+        }
+
+        const nextSnapshot = store.disabledSnapshots[normalizedNextGroupId];
+        if (!Object.prototype.hasOwnProperty.call(nextSnapshot, normalizedItemId) || !!nextSnapshot[normalizedItemId] !== previousRecordedDisabled) {
+          nextSnapshot[normalizedItemId] = previousRecordedDisabled;
+          storeChanged = true;
+        }
+
+        if (!nextScript.disabled) {
+          nextScript.disabled = true;
+          scriptsChanged = true;
+        }
+      } else if (previousFolderDisabled) {
+        if (!!nextScript.disabled !== previousRecordedDisabled) {
+          nextScript.disabled = previousRecordedDisabled;
+          scriptsChanged = true;
+        }
+      }
+
+      if (storeChanged) {
+        saveStore();
+      }
+
+      if (scriptsChanged) {
+        nextScripts[scriptIndex] = nextScript;
+        await saveScriptsForCurrentScope(nextScripts, ctx);
+        await reloadRegexUi(ctx);
+      }
+
+      return storeChanged || scriptsChanged;
+    }
+
+    function parseImportBundle(rawText) {
+      let parsed = null;
+      try {
+        parsed = JSON.parse(rawText);
+      } catch {
+        throw new Error('导入文件不是合法的 JSON');
+      }
+
+      if (!parsed || parsed.type !== EXPORT_BUNDLE_TYPE) {
+        throw new Error('导入文件不是本插件导出的文件夹包');
+      }
+
+      const version = Number(parsed.version);
+      if (!Number.isFinite(version) || version < 1 || version > EXPORT_BUNDLE_VERSION) {
+        throw new Error(`不支持的文件夹包版本：${parsed.version}`);
+      }
+
+      const group = parsed.group && typeof parsed.group === 'object' ? parsed.group : null;
+      if (!group) {
+        throw new Error('导入文件缺少文件夹信息');
+      }
+
+      const scripts = Array.isArray(parsed.scripts)
+        ? parsed.scripts
+            .map((script) => cloneJsonData(script, null))
+            .filter((script) => script && typeof script === 'object')
+        : [];
+      if (scripts.length < 1) {
+        throw new Error('导入文件中没有可用的正则数据');
+      }
+
+      const snapshotSource = parsed.disabledSnapshotByScriptId && typeof parsed.disabledSnapshotByScriptId === 'object'
+        ? parsed.disabledSnapshotByScriptId
+        : {};
+
+      return {
+        version,
+        sourceScope: normalizeName(parsed?.source?.scope),
+        group: {
+          name: getImportBaseGroupName(group.name),
+          disabled: !!group.disabled,
+          collapsed: !!group.collapsed
+        },
+        scripts,
+        disabledSnapshotByScriptId: Object.fromEntries(
+          Object.entries(snapshotSource)
+            .filter(([scriptId]) => !!normalizeName(scriptId))
+            .map(([scriptId, value]) => [normalizeName(scriptId), !!value])
+        )
+      };
+    }
+
+    async function exportGroup(groupId) {
+      const group = getGroupById(groupId);
+      if (!group) {
+        toast(`请选择要导出的${FOLDER_LABEL}`, 'warning');
+        return;
+      }
+
+      const items = collectItems();
+      const groupItems = items.filter((item) => store.assignments[item.id] === groupId);
+      if (groupItems.length < 1) {
+        toast(`当前${FOLDER_LABEL}内没有可导出的正则`, 'warning');
+        return;
+      }
+
+      const currentScripts = getScriptsByCurrentScope();
+      const scriptsByItemId = getScriptsByItemId(currentScripts);
+      const exportedScripts = [];
+      const snapshotByScriptId = {};
+      const snapshotSource = store.disabledSnapshots?.[groupId] && typeof store.disabledSnapshots[groupId] === 'object'
+        ? store.disabledSnapshots[groupId]
+        : {};
+
+      for (const item of groupItems) {
+        const script = scriptsByItemId.get(item.id);
+        if (!script) {
+          toast(`检测到无法定位脚本数据的正则，已取消导出${FOLDER_LABEL}`, 'error');
+          return;
+        }
+
+        const clonedScript = cloneJsonData(script, null);
+        if (!clonedScript || typeof clonedScript !== 'object') {
+          toast('正则数据序列化失败，已取消导出', 'error');
+          return;
+        }
+
+        const scriptId = normalizeName(clonedScript.id);
+        if (scriptId && Object.prototype.hasOwnProperty.call(snapshotSource, item.id)) {
+          snapshotByScriptId[scriptId] = !!snapshotSource[item.id];
+        }
+
+        exportedScripts.push(clonedScript);
+      }
+
+      const payload = {
+        type: EXPORT_BUNDLE_TYPE,
+        version: EXPORT_BUNDLE_VERSION,
+        source: {
+          module: MODULE_NAME,
+          scope,
+          title: titleText,
+          exportedAt: new Date().toISOString()
+        },
+        group: {
+          name: group.name,
+          disabled: !!store.disabledFolders?.[groupId],
+          collapsed: !!store.collapsed?.[groupId]
+        },
+        scripts: exportedScripts,
+        disabledSnapshotByScriptId: snapshotByScriptId
+      };
+
+      try {
+        downloadTextFile(buildExportFileName(group.name), JSON.stringify(payload, null, 2));
+        toast(`已导出${FOLDER_LABEL}“${group.name}”`, 'success');
+      } catch (error) {
+        toast(error?.message || '导出失败', 'error');
+      }
+    }
+
+    async function importGroup() {
+      const file = await pickImportFile();
+      if (!file) return;
+
+      let bundle = null;
+      try {
+        bundle = parseImportBundle(await readFileText(file));
+      } catch (error) {
+        toast(error?.message || '导入失败', 'error');
+        return;
+      }
+
+      const ctx = getCtx();
+      const currentScripts = getScriptsByCurrentScope(ctx);
+      if (!Array.isArray(currentScripts)) {
+        toast('当前范围的正则列表不可用，导入失败', 'error');
+        return;
+      }
+
+      let nextGroupId = uid('group');
+      while (getGroupById(nextGroupId)) {
+        nextGroupId = uid('group');
+      }
+
+      const nextGroupName = getUniqueGroupName(bundle.group.name);
+      const existingScriptIds = new Set(
+        currentScripts
+          .map((script) => normalizeName(script?.id))
+          .filter(Boolean)
+      );
+
+      const importedEntries = [];
+      for (const rawScript of bundle.scripts) {
+        const clonedScript = cloneJsonData(rawScript, null);
+        if (!clonedScript || typeof clonedScript !== 'object') continue;
+
+        const originalId = normalizeName(clonedScript.id);
+        const originalDisabled = !!clonedScript.disabled;
+        let nextScriptId = '';
+        if (originalId && !existingScriptIds.has(originalId)) {
+          nextScriptId = originalId;
+          existingScriptIds.add(nextScriptId);
+        } else {
+          nextScriptId = generateUniqueScriptId(existingScriptIds);
+        }
+
+        clonedScript.id = nextScriptId;
+        if (bundle.group.disabled) clonedScript.disabled = true;
+        importedEntries.push({
+          originalId,
+          originalDisabled,
+          script: clonedScript
+        });
+      }
+
+      if (importedEntries.length < 1) {
+        toast('导入文件中没有可用的正则数据', 'error');
+        return;
+      }
+
+      if (!store.disabledFolders || typeof store.disabledFolders !== 'object') {
+        store.disabledFolders = {};
+      }
+      if (!store.disabledSnapshots || typeof store.disabledSnapshots !== 'object') {
+        store.disabledSnapshots = {};
+      }
+
+      store.groups.push({
+        id: nextGroupId,
+        name: nextGroupName,
+        order: store.groups.length + 1
+      });
+
+      if (bundle.group.collapsed) store.collapsed[nextGroupId] = true;
+      else delete store.collapsed[nextGroupId];
+
+      if (bundle.group.disabled) {
+        store.disabledFolders[nextGroupId] = true;
+        const nextSnapshot = {};
+        for (const entry of importedEntries) {
+          nextSnapshot[`dom:${entry.script.id}`] = entry.originalId && Object.prototype.hasOwnProperty.call(bundle.disabledSnapshotByScriptId, entry.originalId)
+            ? !!bundle.disabledSnapshotByScriptId[entry.originalId]
+            : entry.originalDisabled;
+        }
+        store.disabledSnapshots[nextGroupId] = nextSnapshot;
+      } else {
+        delete store.disabledFolders[nextGroupId];
+        delete store.disabledSnapshots[nextGroupId];
+      }
+
+      for (const entry of importedEntries) {
+        store.assignments[`dom:${entry.script.id}`] = nextGroupId;
+      }
+
+      pendingViewportRestore = captureViewportState(getHeaderEl());
+      saveStore();
+      await saveScriptsForCurrentScope(currentScripts.concat(importedEntries.map((entry) => entry.script)), ctx);
+      await reloadRegexUi(ctx);
+      await renderTree();
+
+      const scopeHint = bundle.sourceScope ? `（来源：${bundle.sourceScope}）` : '';
+      toast(`已导入${FOLDER_LABEL}“${nextGroupName}”${scopeHint}`, 'success');
     }
 
     function collectItems(listEl = getListEl()) {
@@ -625,6 +1060,7 @@
       const validItemIds = new Set(items.map((item) => item.id));
       const validGroupIds = new Set(store.groups.map((group) => group.id));
       const shouldPruneMissingItems = scope === 'global' && items.length > 0;
+      const canPruneSnapshotItems = items.length > 0;
       let changed = false;
 
       for (const [itemId, groupId] of Object.entries(store.assignments)) {
@@ -650,8 +1086,28 @@
         }
       }
 
-      for (const groupId of Object.keys(store.disabledSnapshots || {})) {
+      for (const [groupId, snapshot] of Object.entries(store.disabledSnapshots || {})) {
         if (groupId !== UNGROUPED_ID && !validGroupIds.has(groupId)) {
+          delete store.disabledSnapshots[groupId];
+          changed = true;
+          continue;
+        }
+
+        if (!snapshot || typeof snapshot !== 'object') {
+          delete store.disabledSnapshots[groupId];
+          changed = true;
+          continue;
+        }
+
+        for (const itemId of Object.keys(snapshot)) {
+          const missingInCurrentView = !validItemIds.has(itemId);
+          if (canPruneSnapshotItems && missingInCurrentView) {
+            delete snapshot[itemId];
+            changed = true;
+          }
+        }
+
+        if (Object.keys(snapshot).length < 1) {
           delete store.disabledSnapshots[groupId];
           changed = true;
         }
@@ -738,6 +1194,10 @@
           <button type="button" class="menu_button interactable" id="${RENAME_GROUP_ID}">重命名${FOLDER_LABEL}</button>
           <button type="button" class="menu_button interactable st-rmg-danger" id="${DELETE_GROUP_ID}">删除${FOLDER_LABEL}</button>
         </div>
+        <div class="st-rmg-transfer-actions">
+          <button type="button" class="menu_button interactable" id="${EXPORT_GROUP_ID}">导出${FOLDER_LABEL}</button>
+          <button type="button" class="menu_button interactable" id="${IMPORT_GROUP_ID}">导入${FOLDER_LABEL}</button>
+        </div>
         <select id="${GROUP_SELECT_ID}" class="text_pole st-rmg-group-select"></select>
       `;
 
@@ -755,8 +1215,10 @@
       const canEditGroup = selectedGroupId !== UNGROUPED_ID && getGroups().some((group) => group.id === selectedGroupId);
       const renameBtn = containerEl.querySelector(`#${RENAME_GROUP_ID}`);
       const deleteBtn = containerEl.querySelector(`#${DELETE_GROUP_ID}`);
+      const exportBtn = containerEl.querySelector(`#${EXPORT_GROUP_ID}`);
       if (renameBtn) renameBtn.disabled = !canEditGroup;
       if (deleteBtn) deleteBtn.disabled = !canEditGroup;
+      if (exportBtn) exportBtn.disabled = !canEditGroup;
     }
 
     function renderGroupedList(items) {
@@ -1068,6 +1530,8 @@
         };
 
         const wrappedStop = function (...args) {
+          const previousGroupId = sortingItemId ? (store.assignments[sortingItemId] ?? null) : null;
+
           if (sortingItemId) {
             if (!sortingTargetGroupId || sortingTargetGroupId === UNGROUPED_ID) delete store.assignments[sortingItemId];
             else store.assignments[sortingItemId] = sortingTargetGroupId;
@@ -1079,6 +1543,11 @@
 
           Promise.resolve(result)
             .catch(() => {})
+            .then(async () => {
+              if (!sortingItemId) return;
+              const nextGroupId = store.assignments[sortingItemId] ?? null;
+              await syncItemDisabledStateForAssignmentChange(sortingItemId, previousGroupId, nextGroupId);
+            })
             .finally(() => {
               sorting = false;
               sortingItemId = '';
@@ -1134,6 +1603,12 @@
       const ok = await openConfirm(`删除${FOLDER_LABEL}“${group.name}”后，该${FOLDER_LABEL}中的正则会回到${UNGROUPED_LABEL}，是否继续？`);
       if (!ok) return;
 
+      if (store.disabledFolders?.[groupId]) {
+        delete store.disabledFolders[groupId];
+        await applyFolderDisabledState(groupId, true, collectItems());
+      }
+      delete store.disabledSnapshots[groupId];
+
       store.groups = store.groups.filter((entry) => entry.id !== groupId);
       for (const [itemId, assignedGroupId] of Object.entries(store.assignments)) {
         if (assignedGroupId === groupId) delete store.assignments[itemId];
@@ -1155,14 +1630,6 @@
         const items = collectItems(listEl);
         migrateLegacyAssignments(items);
         cleanupAssignments(items);
-        const overlayChanged = await syncFolderDisableOverlay(items);
-        if (overlayChanged) {
-          schedule(() => {
-            renderTree();
-          });
-          return;
-        }
-
         renderGroupedList(items);
         syncNativeSortableOptions(listEl);
         bindNativeSortableEvents(listEl);
@@ -1225,6 +1692,23 @@
           e.stopPropagation();
           const selectEl = headerEl.querySelector(`#${GROUP_SELECT_ID}`);
           deleteGroup(String(selectEl?.value || ''));
+          return;
+        }
+
+        const exportBtn = e.target?.closest?.(`#${EXPORT_GROUP_ID}`);
+        if (exportBtn) {
+          e.preventDefault();
+          e.stopPropagation();
+          const selectEl = headerEl.querySelector(`#${GROUP_SELECT_ID}`);
+          void exportGroup(String(selectEl?.value || ''));
+          return;
+        }
+
+        const importBtn = e.target?.closest?.(`#${IMPORT_GROUP_ID}`);
+        if (importBtn) {
+          e.preventDefault();
+          e.stopPropagation();
+          void importGroup();
         }
       });
     }

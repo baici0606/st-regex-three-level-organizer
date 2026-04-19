@@ -172,6 +172,7 @@
 }
 
 .st-rmg-folder-actions.is-placeholder {
+  min-width: 42px;
   visibility: hidden;
   pointer-events: none;
 }

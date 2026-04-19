@@ -681,6 +681,7 @@
       let changed = false;
 
       for (const item of items) {
+        if (protectedPendingKeys.has(item.id)) continue;
         let legacyKey = '';
         let legacyGroupId = undefined;
 
@@ -716,13 +717,15 @@
       const validGroupIds = new Set(store.groups.map((group) => group.id));
       const shouldPruneMissingItems = scope === 'global' && items.length > 0;
       const canPruneSnapshotItems = items.length > 0;
+      const currentScriptsByItemId = getScriptsByItemId();
       let changed = false;
 
       for (const [itemId, groupId] of Object.entries(store.assignments)) {
         const missingInCurrentView = !validItemIds.has(itemId);
+        const missingInCurrentScripts = !currentScriptsByItemId.has(itemId);
         const invalidGroup = groupId && !validGroupIds.has(groupId);
         if (protectedPendingKeys.has(itemId)) continue;
-        if ((shouldPruneMissingItems && missingInCurrentView) || invalidGroup) {
+        if ((shouldPruneMissingItems && missingInCurrentView && missingInCurrentScripts) || invalidGroup) {
           delete store.assignments[itemId];
           changed = true;
         }
@@ -757,8 +760,9 @@
 
         for (const itemId of Object.keys(snapshot)) {
           const missingInCurrentView = !validItemIds.has(itemId);
+          const missingInCurrentScripts = !currentScriptsByItemId.has(itemId);
           if (protectedPendingKeys.has(itemId)) continue;
-          if (canPruneSnapshotItems && missingInCurrentView) {
+          if (canPruneSnapshotItems && missingInCurrentView && missingInCurrentScripts) {
             delete snapshot[itemId];
             changed = true;
           }

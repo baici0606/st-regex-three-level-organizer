@@ -815,40 +815,39 @@
         return;
       }
 
-      const items = collectItems();
-      const groupItems = items.filter((item) => store.assignments[item.id] === groupId);
-      if (groupItems.length < 1) {
+      const currentScripts = getScriptsByCurrentScope();
+      const assignedScriptIds = new Set(
+        Object.entries(store.assignments)
+          .filter(([, assignedGroupId]) => assignedGroupId === groupId)
+          .map(([itemId]) => normalizeName(itemId).startsWith('dom:') ? normalizeName(itemId).slice(4) : '')
+          .filter(Boolean)
+      );
+
+      const exportedScripts = currentScripts
+        .filter((script) => {
+          const scriptId = normalizeName(script?.id);
+          return !!scriptId && assignedScriptIds.has(scriptId);
+        })
+        .map((script) => cloneJsonData(script, null))
+        .filter((script) => script && typeof script === 'object');
+
+      if (exportedScripts.length < 1) {
         toast(`当前${FOLDER_LABEL}内没有可导出的正则`, 'warning');
         return;
       }
 
-      const currentScripts = getScriptsByCurrentScope();
-      const scriptsByItemId = getScriptsByItemId(currentScripts);
-      const exportedScripts = [];
       const snapshotByScriptId = {};
       const snapshotSource = store.disabledSnapshots?.[groupId] && typeof store.disabledSnapshots[groupId] === 'object'
         ? store.disabledSnapshots[groupId]
         : {};
 
-      for (const item of groupItems) {
-        const script = scriptsByItemId.get(item.id);
-        if (!script) {
-          toast(`检测到无法定位脚本数据的正则，已取消导出${FOLDER_LABEL}`, 'error');
-          return;
-        }
-
-        const clonedScript = cloneJsonData(script, null);
-        if (!clonedScript || typeof clonedScript !== 'object') {
-          toast('正则数据序列化失败，已取消导出', 'error');
-          return;
-        }
-
+      for (const clonedScript of exportedScripts) {
         const scriptId = normalizeName(clonedScript.id);
-        if (scriptId && Object.prototype.hasOwnProperty.call(snapshotSource, item.id)) {
-          snapshotByScriptId[scriptId] = !!snapshotSource[item.id];
+        if (!scriptId) continue;
+        const snapshotKey = `dom:${scriptId}`;
+        if (Object.prototype.hasOwnProperty.call(snapshotSource, snapshotKey)) {
+          snapshotByScriptId[scriptId] = !!snapshotSource[snapshotKey];
         }
-
-        exportedScripts.push(clonedScript);
       }
 
       const payload = {
@@ -1169,6 +1168,7 @@
       containerEl.innerHTML = `
         <div class="st-rmg-group-actions">
           <button type="button" class="menu_button interactable" id="${NEW_GROUP_ID}">新增${FOLDER_LABEL}</button>
+          <button type="button" class="menu_button interactable" id="${MODULE_NAME}-${scope}-import-group-panel">导入${FOLDER_LABEL}</button>
           <button type="button" class="menu_button interactable" id="${RENAME_GROUP_ID}">重命名${FOLDER_LABEL}</button>
           <button type="button" class="menu_button interactable st-rmg-danger" id="${DELETE_GROUP_ID}">删除${FOLDER_LABEL}</button>
         </div>
@@ -1240,7 +1240,6 @@
           ${groupId !== UNGROUPED_ID ? `
             <span class="st-rmg-folder-actions">
               <button type="button" class="menu_button interactable st-rmg-folder-action" data-folder-export="${escapeHtml(groupId)}" title="导出当前${FOLDER_LABEL}">导出</button>
-              <button type="button" class="menu_button interactable st-rmg-folder-action" data-folder-import="${escapeHtml(groupId)}" title="在当前${FOLDER_LABEL}后导入新${FOLDER_LABEL}">导入</button>
             </span>
           ` : ''}
           <button type="button" class="st-rmg-folder-switch ${folderState === STATE_DISABLED ? 'is-off' : 'is-on'}" data-folder-toggle="${escapeHtml(groupId)}" title="${escapeHtml(toggleTitle)}" aria-pressed="${folderState === STATE_DISABLED ? 'false' : 'true'}">
@@ -1655,6 +1654,14 @@
           return;
         }
 
+        const importPanelBtn = e.target?.closest?.(`#${MODULE_NAME}-${scope}-import-group-panel`);
+        if (importPanelBtn) {
+          e.preventDefault();
+          e.stopPropagation();
+          void importGroup();
+          return;
+        }
+
         const renameBtn = e.target?.closest?.(`#${RENAME_GROUP_ID}`);
         if (renameBtn) {
           e.preventDefault();
@@ -1687,15 +1694,6 @@
           e.stopPropagation();
           const groupId = String(exportBtn.dataset.folderExport || '');
           if (groupId) void exportGroup(groupId);
-          return;
-        }
-
-        const importBtn = e.target?.closest?.('[data-folder-import]');
-        if (importBtn) {
-          e.preventDefault();
-          e.stopPropagation();
-          const groupId = String(importBtn.dataset.folderImport || '');
-          void importGroup(groupId);
           return;
         }
 

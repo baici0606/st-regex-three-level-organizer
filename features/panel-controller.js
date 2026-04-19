@@ -251,6 +251,21 @@
       await new Promise((resolve) => schedule(resolve));
     }
 
+    function refreshAllPanels() {
+      const controllers = window.STRegexManualGroups?.bootstrap?._controllers;
+      if (!Array.isArray(controllers) || controllers.length < 1) return;
+
+      schedule(() => {
+        for (const controller of controllers) {
+          try {
+            controller?.tryEnsure?.();
+          } catch {
+            // ignore individual controller refresh failures
+          }
+        }
+      });
+    }
+
     function getFolderItemIds(groupId, items = collectItems(), currentScripts = getScriptsByCurrentScope()) {
       const folderScriptIds = getFolderScriptIds(groupId, currentScripts);
       const itemIds = new Set();
@@ -341,6 +356,8 @@
 
       await saveScriptsForCurrentScope(nextScripts, ctx);
       await reloadRegexUi(ctx);
+      refreshAllPanels();
+      toast(`${enabled ? '已启用' : '已关闭'}${targetItemIds.length} 条${FOLDER_LABEL}内正则`, 'success');
       return true;
     }
 
@@ -731,6 +748,7 @@
       saveStore();
       await saveScriptsForCurrentScope(currentScripts.concat(importedEntries.map((entry) => entry.script)), ctx);
       await reloadRegexUi(ctx);
+      refreshAllPanels();
       await renderTree();
       queuePostImportRenderRetries();
 

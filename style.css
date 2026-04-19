@@ -96,7 +96,9 @@
   gap: 6px;
   width: 100%;
   flex: 1 1 100%;
-  min-width: 0;
+  min-width: 100%;
+  max-width: 100%;
+  align-self: stretch;
   box-sizing: border-box;
   padding: 5px 10px;
   margin-top: 0;
@@ -158,20 +160,6 @@
 .st-rmg-group-header[data-group-id="__ungrouped__"] .st-rmg-folder-controls {
   min-width: 76px;
   justify-content: flex-end;
-}
-
-.st-rmg-group-header[data-group-id="__ungrouped__"] {
-  display: flex;
-  width: 100%;
-  min-width: 100%;
-  max-width: 100%;
-  box-sizing: border-box;
-}
-
-.st-rmg-sort-anchor + .st-rmg-group-header,
-.st-rmg-group-header[data-group-id="__ungrouped__"] {
-  width: 100%;
-  align-self: stretch;
 }
 
 .st-rmg-folder-actions {

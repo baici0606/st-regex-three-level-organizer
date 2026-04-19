@@ -526,6 +526,17 @@
     });
   }
 
+  function removeScriptsFromCurrentList(scriptIds = []) {
+    const targetScriptIds = new Set(scriptIds.map((scriptId) => normalizeName(scriptId)).filter(Boolean));
+    if (targetScriptIds.size < 1) return;
+
+    for (const itemEl of getDirectScriptItems(getListEl())) {
+      const itemScriptId = normalizeName(getItemKeyCandidate(itemEl));
+      if (!itemScriptId || !targetScriptIds.has(itemScriptId)) continue;
+      itemEl.remove();
+    }
+  }
+
   function getFolderItemIds(groupId, items = collectItems(), currentScripts = getScriptsByCurrentScope()) {
     const folderScriptIds = getFolderScriptIds(groupId, currentScripts);
     const itemIds = new Set();
@@ -1495,7 +1506,9 @@
                 </button>
                 `).join('')}
               </span>
-            ` : ''}
+            ` : `
+              <span class="st-rmg-folder-actions is-placeholder" aria-hidden="true"></span>
+            `}
             <button type="button" class="st-rmg-folder-switch ${folderState === STATE_DISABLED ? 'is-off' : 'is-on'}" data-folder-toggle="${escapeHtml(groupId)}" title="${escapeHtml(toggleTitle)}" aria-pressed="${folderState === STATE_DISABLED ? 'false' : 'true'}">
               <span class="st-rmg-folder-switch-track">
                 <span class="st-rmg-folder-switch-thumb"></span>
@@ -1874,8 +1887,10 @@
 
       const nextScripts = currentScripts.filter((script) => !targetScriptIds.has(normalizeName(script?.id)));
       await saveScriptsForCurrentScope(nextScripts, ctx);
+      removeScriptsFromCurrentList(Array.from(targetScriptIds));
 
       store.groups = store.groups.filter((entry) => entry.id !== groupId);
+      pendingImportedAssignments = (pendingImportedAssignments || []).filter((entry) => entry.groupId !== groupId && !targetScriptIds.has(normalizeName(entry?.scriptId)));
       for (const itemId of Object.keys(store.assignments)) {
         const assignedGroupId = store.assignments[itemId];
         if (assignedGroupId === groupId || targetScriptIds.has(getScriptIdFromItemId(itemId))) {

@@ -517,9 +517,8 @@
       pendingImportedAssignments = importedEntries.map((entry) => ({
         groupId,
         scriptId: normalizeName(entry?.script?.id),
-        targetName: normalizeName(entry?.script?.scriptName || entry?.script?.name || ''),
         tempAssignmentKey: `dom:${entry?.script?.id || ''}`
-      })).filter((entry) => entry.scriptId || entry.targetName);
+      })).filter((entry) => entry.scriptId);
     }
 
     function alignImportedAssignments(items = collectItems()) {
@@ -532,10 +531,8 @@
       for (const item of items) {
         if (usedItemIds.has(item.id)) continue;
         const itemKey = normalizeName(item.keyCandidate);
-        const itemName = normalizeName(item.name);
         const matchedIndex = pendingEntries.findIndex((entry) => {
-          if (entry.scriptId && itemKey && itemKey === entry.scriptId) return true;
-          return !!entry.targetName && !!itemName && entry.targetName === itemName;
+          return !!entry.scriptId && !!itemKey && itemKey === entry.scriptId;
         });
         if (matchedIndex < 0) continue;
 

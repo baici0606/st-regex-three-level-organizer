@@ -623,24 +623,53 @@
       return `${keySegment(groupName, 'regex-folder')}${EXPORT_FILE_EXTENSION}`;
     }
 
-    function downloadTextFile(fileName, content, mimeType = 'application/json;charset=utf-8') {
+    async function downloadTextFile(fileName, content, mimeType = 'application/json;charset=utf-8') {
+      const suggestedName = normalizeName(fileName) || 'export.json';
+
+      if (typeof window.showSaveFilePicker === 'function') {
+        try {
+          const extensionMatch = suggestedName.match(/(\.[^./\\]+)$/);
+          const extension = extensionMatch?.[1] || '.json';
+          const mime = normalizeName(mimeType) || 'application/json;charset=utf-8';
+          const handle = await window.showSaveFilePicker({
+            suggestedName,
+            types: [
+              {
+                description: '导出文件',
+                accept: {
+                  [mime]: [extension]
+                }
+              }
+            ]
+          });
+          const writable = await handle.createWritable();
+          await writable.write(content);
+          await writable.close();
+          return true;
+        } catch (error) {
+          if (error?.name === 'AbortError') return false;
+          throw error;
+        }
+      }
+
       if (typeof Blob !== 'function' || typeof URL?.createObjectURL !== 'function') {
         throw new Error('当前环境不支持文件导出');
       }
 
-    const blob = new Blob([content], { type: mimeType });
-    const objectUrl = URL.createObjectURL(blob);
-    const linkEl = document.createElement('a');
-    linkEl.href = objectUrl;
-    linkEl.download = fileName;
-    linkEl.style.display = 'none';
-    linkEl.rel = 'noopener';
-    document.body.appendChild(linkEl);
-    linkEl.click();
-    window.setTimeout(() => {
-      linkEl.remove();
-      URL.revokeObjectURL(objectUrl);
+      const blob = new Blob([content], { type: mimeType });
+      const objectUrl = URL.createObjectURL(blob);
+      const linkEl = document.createElement('a');
+      linkEl.href = objectUrl;
+      linkEl.download = suggestedName;
+      linkEl.style.display = 'none';
+      linkEl.rel = 'noopener';
+      document.body.appendChild(linkEl);
+      linkEl.click();
+      window.setTimeout(() => {
+        linkEl.remove();
+        URL.revokeObjectURL(objectUrl);
       }, 5000);
+      return true;
     }
 
     async function pickImportFile() {
@@ -890,8 +919,10 @@
       };
 
       try {
-        downloadTextFile(buildExportFileName(group.name), JSON.stringify(payload, null, 2));
-        toast(`已导出${FOLDER_LABEL}“${group.name}”`, 'success');
+        const exported = await downloadTextFile(buildExportFileName(group.name), JSON.stringify(payload, null, 2));
+        if (exported) {
+          toast(`已导出${FOLDER_LABEL}“${group.name}”`, 'success');
+        }
       } catch (error) {
         toast(error?.message || '导出失败', 'error');
       }

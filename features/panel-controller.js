@@ -494,8 +494,10 @@
       };
 
       try {
-        downloadTextFile(buildExportFileName(group.name), JSON.stringify(payload, null, 2));
-        toast(`已导出${FOLDER_LABEL}“${group.name}”`, 'success');
+        const exported = await downloadTextFile(buildExportFileName(group.name), JSON.stringify(payload, null, 2));
+        if (exported) {
+          toast(`已导出${FOLDER_LABEL}“${group.name}”`, 'success');
+        }
       } catch (error) {
         toast(error?.message || '导出失败', 'error');
       }

@@ -1247,12 +1247,10 @@
 
     function renderGroupManager(containerEl) {
       if (!containerEl) return;
+      const panelActions = getPanelActionDefinitions();
       containerEl.innerHTML = `
         <div class="st-rmg-group-actions">
-          <button type="button" class="menu_button interactable" id="${NEW_GROUP_ID}">新增${FOLDER_LABEL}</button>
-          <button type="button" class="menu_button interactable" id="${MODULE_NAME}-${scope}-import-group-panel">导入${FOLDER_LABEL}</button>
-          <button type="button" class="menu_button interactable" id="${RENAME_GROUP_ID}">重命名${FOLDER_LABEL}</button>
-          <button type="button" class="menu_button interactable st-rmg-danger" id="${DELETE_GROUP_ID}">删除${FOLDER_LABEL}</button>
+          ${panelActions.map((action) => `<button type="button" class="menu_button interactable ${action.className || ''}" id="${action.id}">${action.label}</button>`).join('')}
         </div>
         <select id="${GROUP_SELECT_ID}" class="text_pole st-rmg-group-select"></select>
       `;
@@ -1275,9 +1273,48 @@
       if (deleteBtn) deleteBtn.disabled = !canEditGroup;
     }
 
+    function getPanelActionDefinitions() {
+      return [
+        { id: NEW_GROUP_ID, label: `新增${FOLDER_LABEL}`, type: 'add' },
+        { id: `${MODULE_NAME}-${scope}-import-group-panel`, label: `导入${FOLDER_LABEL}`, type: 'import' },
+        { id: RENAME_GROUP_ID, label: `重命名${FOLDER_LABEL}`, type: 'rename' },
+        { id: DELETE_GROUP_ID, label: `删除${FOLDER_LABEL}`, type: 'delete', className: 'st-rmg-danger' }
+      ];
+    }
+
+    function getFolderActionDefinitions(groupId) {
+      if (groupId === UNGROUPED_ID) return [];
+      return [
+        {
+          type: 'export',
+          dataset: 'folderExport',
+          value: groupId,
+          title: `导出当前${FOLDER_LABEL}`,
+          ariaLabel: `导出当前${FOLDER_LABEL}`
+        }
+      ];
+    }
+
+    function getAssignmentHelpers() {
+      return {
+        queueImportedAssignments,
+        alignImportedAssignments,
+        migrateLegacyAssignments,
+        cleanupAssignments,
+        syncAssignmentsFromRenderedLayout,
+        getGroupId(itemId) {
+          return store.assignments[itemId] || UNGROUPED_ID;
+        },
+        getGroupIdForItem(item) {
+          return this.getGroupId(item.id);
+        }
+      };
+    }
+
     function renderGroupedList(items) {
       const listEl = getListEl();
       if (!listEl) return;
+      const assignmentHelpers = getAssignmentHelpers();
 
       const groups = getGroups();
       const itemsByGroup = new Map();
@@ -1285,7 +1322,7 @@
       for (const group of groups) itemsByGroup.set(group.id, []);
 
       for (const item of items) {
-        const groupId = store.assignments[item.id];
+        const groupId = assignmentHelpers.getGroupId(item.id);
         if (groupId && itemsByGroup.has(groupId)) itemsByGroup.get(groupId).push(item);
         else itemsByGroup.get(UNGROUPED_ID).push(item);
       }
@@ -1315,18 +1352,21 @@
         if (folderState === STATE_DISABLED) {
           header.classList.add('st-rmg-folder-disabled');
         }
+        const folderActions = getFolderActionDefinitions(groupId);
         header.innerHTML = `
           <span class="st-rmg-folder-handle" draggable="true" title="拖动排序" aria-label="拖动排序">&#8801;</span>
           <span class="st-rmg-group-name">${escapeHtml(title)}</span>
           <span class="st-rmg-group-count">(${count})</span>
-          ${groupId !== UNGROUPED_ID ? `
+          ${folderActions.length ? `
             <span class="st-rmg-folder-actions">
-              <button type="button" class="menu_button interactable st-rmg-folder-action" data-folder-export="${escapeHtml(groupId)}" title="导出当前${FOLDER_LABEL}" aria-label="导出当前${FOLDER_LABEL}">
+              ${folderActions.map((action) => `
+              <button type="button" class="menu_button interactable st-rmg-folder-action" data-${action.dataset}="${escapeHtml(action.value)}" title="${escapeHtml(action.title)}" aria-label="${escapeHtml(action.ariaLabel)}">
                 <span class="st-rmg-folder-export-icon" aria-hidden="true">
                   <span class="st-rmg-folder-export-arrow">↑</span>
                   <span class="st-rmg-folder-export-tray"></span>
                 </span>
               </button>
+              `).join('')}
             </span>
           ` : ''}
           <button type="button" class="st-rmg-folder-switch ${folderState === STATE_DISABLED ? 'is-off' : 'is-on'}" data-folder-toggle="${escapeHtml(groupId)}" title="${escapeHtml(toggleTitle)}" aria-pressed="${folderState === STATE_DISABLED ? 'false' : 'true'}">

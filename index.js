@@ -319,9 +319,6 @@
     const NEW_GROUP_ID = `${MODULE_NAME}-${scope}-new-group`;
     const RENAME_GROUP_ID = `${MODULE_NAME}-${scope}-rename-group`;
     const DELETE_GROUP_ID = `${MODULE_NAME}-${scope}-delete-group`;
-    const EXPORT_GROUP_ID = `${MODULE_NAME}-${scope}-export-group`;
-    const IMPORT_GROUP_ID = `${MODULE_NAME}-${scope}-import-group`;
-
     let store = createDefaultStore();
     let currentStoreKey = '';
     let listObserver = null;
@@ -643,48 +640,21 @@
     }
 
     async function pickImportFile() {
-      if (typeof window.showOpenFilePicker === 'function') {
-        try {
-          const [handle] = await window.showOpenFilePicker({
-            multiple: false,
-            types: [
-              {
-                description: '正则文件夹导出文件',
-                accept: {
-                  'application/json': ['.json', EXPORT_FILE_EXTENSION]
-                }
-              }
-            ]
-          });
-          return handle ? await handle.getFile() : null;
-        } catch {
-          return null;
-        }
-      }
-
       return new Promise((resolve) => {
         const inputEl = document.createElement('input');
-        let settled = false;
-
-        const cleanup = (file = null) => {
-          if (settled) return;
-          settled = true;
-          window.removeEventListener('focus', handleWindowFocus, true);
-          inputEl.remove();
-          resolve(file || null);
-        };
-
-        const handleWindowFocus = () => {
-          window.setTimeout(() => {
-            cleanup(inputEl.files?.[0] || null);
-          }, 300);
-        };
 
         inputEl.type = 'file';
         inputEl.accept = `${EXPORT_FILE_EXTENSION},application/json,.json`;
         inputEl.style.display = 'none';
-        inputEl.addEventListener('change', () => cleanup(inputEl.files?.[0] || null), { once: true });
-        window.addEventListener('focus', handleWindowFocus, true);
+        inputEl.addEventListener('change', () => {
+          const file = inputEl.files?.[0] || null;
+          inputEl.remove();
+          resolve(file);
+        }, { once: true });
+        inputEl.addEventListener('cancel', () => {
+          inputEl.remove();
+          resolve(null);
+        }, { once: true });
         document.body.appendChild(inputEl);
         inputEl.click();
       });
@@ -907,7 +877,15 @@
       }
     }
 
-    async function importGroup() {
+    function insertGroupAfterAnchor(nextGroup, anchorGroupId = '') {
+      const orderedGroups = getGroups().map((group) => ({ ...group }));
+      const anchorIndex = orderedGroups.findIndex((group) => group.id === anchorGroupId);
+      const insertIndex = anchorIndex >= 0 ? anchorIndex + 1 : orderedGroups.length;
+      orderedGroups.splice(insertIndex, 0, nextGroup);
+      store.groups = orderedGroups.map((group, index) => ({ ...group, order: index + 1 }));
+    }
+
+    async function importGroup(anchorGroupId = '') {
       const file = await pickImportFile();
       if (!file) return;
 
@@ -974,11 +952,11 @@
         store.disabledSnapshots = {};
       }
 
-      store.groups.push({
+      insertGroupAfterAnchor({
         id: nextGroupId,
         name: nextGroupName,
         order: store.groups.length + 1
-      });
+      }, anchorGroupId);
 
       if (bundle.group.collapsed) store.collapsed[nextGroupId] = true;
       else delete store.collapsed[nextGroupId];
@@ -1194,10 +1172,6 @@
           <button type="button" class="menu_button interactable" id="${RENAME_GROUP_ID}">重命名${FOLDER_LABEL}</button>
           <button type="button" class="menu_button interactable st-rmg-danger" id="${DELETE_GROUP_ID}">删除${FOLDER_LABEL}</button>
         </div>
-        <div class="st-rmg-transfer-actions">
-          <button type="button" class="menu_button interactable" id="${EXPORT_GROUP_ID}">导出${FOLDER_LABEL}</button>
-          <button type="button" class="menu_button interactable" id="${IMPORT_GROUP_ID}">导入${FOLDER_LABEL}</button>
-        </div>
         <select id="${GROUP_SELECT_ID}" class="text_pole st-rmg-group-select"></select>
       `;
 
@@ -1215,10 +1189,8 @@
       const canEditGroup = selectedGroupId !== UNGROUPED_ID && getGroups().some((group) => group.id === selectedGroupId);
       const renameBtn = containerEl.querySelector(`#${RENAME_GROUP_ID}`);
       const deleteBtn = containerEl.querySelector(`#${DELETE_GROUP_ID}`);
-      const exportBtn = containerEl.querySelector(`#${EXPORT_GROUP_ID}`);
       if (renameBtn) renameBtn.disabled = !canEditGroup;
       if (deleteBtn) deleteBtn.disabled = !canEditGroup;
-      if (exportBtn) exportBtn.disabled = !canEditGroup;
     }
 
     function renderGroupedList(items) {
@@ -1265,6 +1237,12 @@
           <span class="st-rmg-folder-handle" draggable="true" title="拖动排序" aria-label="拖动排序">&#8801;</span>
           <span class="st-rmg-group-name">${escapeHtml(title)}</span>
           <span class="st-rmg-group-count">(${count})</span>
+          ${groupId !== UNGROUPED_ID ? `
+            <span class="st-rmg-folder-actions">
+              <button type="button" class="menu_button interactable st-rmg-folder-action" data-folder-export="${escapeHtml(groupId)}" title="导出当前${FOLDER_LABEL}">导出</button>
+              <button type="button" class="menu_button interactable st-rmg-folder-action" data-folder-import="${escapeHtml(groupId)}" title="在当前${FOLDER_LABEL}后导入新${FOLDER_LABEL}">导入</button>
+            </span>
+          ` : ''}
           <button type="button" class="st-rmg-folder-switch ${folderState === STATE_DISABLED ? 'is-off' : 'is-on'}" data-folder-toggle="${escapeHtml(groupId)}" title="${escapeHtml(toggleTitle)}" aria-pressed="${folderState === STATE_DISABLED ? 'false' : 'true'}">
             <span class="st-rmg-folder-switch-track">
               <span class="st-rmg-folder-switch-thumb"></span>
@@ -1695,21 +1673,6 @@
           return;
         }
 
-        const exportBtn = e.target?.closest?.(`#${EXPORT_GROUP_ID}`);
-        if (exportBtn) {
-          e.preventDefault();
-          e.stopPropagation();
-          const selectEl = headerEl.querySelector(`#${GROUP_SELECT_ID}`);
-          void exportGroup(String(selectEl?.value || ''));
-          return;
-        }
-
-        const importBtn = e.target?.closest?.(`#${IMPORT_GROUP_ID}`);
-        if (importBtn) {
-          e.preventDefault();
-          e.stopPropagation();
-          void importGroup();
-        }
       });
     }
 
@@ -1718,6 +1681,24 @@
       listEl.dataset.stRmgBound = '1';
 
       listEl.addEventListener('click', (e) => {
+        const exportBtn = e.target?.closest?.('[data-folder-export]');
+        if (exportBtn) {
+          e.preventDefault();
+          e.stopPropagation();
+          const groupId = String(exportBtn.dataset.folderExport || '');
+          if (groupId) void exportGroup(groupId);
+          return;
+        }
+
+        const importBtn = e.target?.closest?.('[data-folder-import]');
+        if (importBtn) {
+          e.preventDefault();
+          e.stopPropagation();
+          const groupId = String(importBtn.dataset.folderImport || '');
+          void importGroup(groupId);
+          return;
+        }
+
         const toggleBtn = e.target?.closest?.('[data-folder-toggle]');
         if (toggleBtn) {
           e.preventDefault();

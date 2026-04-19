@@ -334,7 +334,6 @@
     let lastRenderedGroupSignature = '';
     let selectedGroupId = UNGROUPED_ID;
     let pendingViewportRestore = null;
-    let pendingImportedAssignments = [];
     let panelCollapsed = !!loadJson(PANEL_COLLAPSED_KEY, false);
 
     function pauseListObserver() {
@@ -626,22 +625,11 @@
     async function downloadTextFile(fileName, content, mimeType = 'application/json;charset=utf-8') {
       const suggestedName = normalizeName(fileName) || 'export.json';
       const blobMimeType = normalizeName(mimeType) || 'application/json;charset=utf-8';
-      const pickerAcceptMime = blobMimeType.split(';', 1)[0] || 'application/json';
 
       if (typeof window.showSaveFilePicker === 'function') {
         try {
-          const extensionMatch = suggestedName.match(/(\.[^./\\]+)$/);
-          const extension = extensionMatch?.[1] || '.json';
           const handle = await window.showSaveFilePicker({
-            suggestedName,
-            types: [
-              {
-                description: '导出文件',
-                accept: {
-                  [pickerAcceptMime]: [extension]
-                }
-              }
-            ]
+            suggestedName
           });
           const writable = await handle.createWritable();
           await writable.write(content);
@@ -937,58 +925,6 @@
       store.groups = orderedGroups.map((group, index) => ({ ...group, order: index + 1 }));
     }
 
-    function queueImportedAssignments(importedEntries, groupId) {
-      if (!Array.isArray(importedEntries) || importedEntries.length < 1) return;
-
-      pendingImportedAssignments = importedEntries.map((entry) => ({
-        groupId,
-        scriptId: normalizeName(entry?.script?.id),
-        tempAssignmentKey: `dom:${entry?.script?.id || ''}`
-      })).filter((entry) => entry.scriptId);
-    }
-
-    function alignImportedAssignments(items = collectItems()) {
-      if (!Array.isArray(pendingImportedAssignments) || pendingImportedAssignments.length < 1) return false;
-
-      const pendingEntries = pendingImportedAssignments.map((entry) => ({ ...entry }));
-      let changed = false;
-      const usedItemIds = new Set();
-
-      for (const item of items) {
-        if (usedItemIds.has(item.id)) continue;
-        const itemKey = normalizeName(item.keyCandidate);
-        const matchedIndex = pendingEntries.findIndex((entry) => {
-          return !!entry.scriptId && !!itemKey && itemKey === entry.scriptId;
-        });
-        if (matchedIndex < 0) continue;
-
-        const [matchedEntry] = pendingEntries.splice(matchedIndex, 1);
-        const tempAssignmentKey = matchedEntry.tempAssignmentKey;
-        const groupId = matchedEntry.groupId;
-        usedItemIds.add(item.id);
-
-        if (store.assignments[tempAssignmentKey] !== undefined && tempAssignmentKey !== item.id) {
-          delete store.assignments[tempAssignmentKey];
-          changed = true;
-        }
-
-        if (store.assignments[item.id] !== groupId) {
-          store.assignments[item.id] = groupId;
-          changed = true;
-        }
-
-        if (store.disabledSnapshots?.[groupId] && Object.prototype.hasOwnProperty.call(store.disabledSnapshots[groupId], tempAssignmentKey)) {
-          store.disabledSnapshots[groupId][item.id] = store.disabledSnapshots[groupId][tempAssignmentKey];
-          delete store.disabledSnapshots[groupId][tempAssignmentKey];
-          changed = true;
-        }
-      }
-
-      pendingImportedAssignments = pendingEntries;
-
-      return changed;
-    }
-
     async function importGroup(anchorGroupId = '') {
       const file = await pickImportFile();
       if (!file) return;
@@ -1083,7 +1019,6 @@
         store.assignments[`dom:${entry.script.id}`] = nextGroupId;
       }
 
-      queueImportedAssignments(importedEntries, nextGroupId);
       pendingViewportRestore = captureViewportState(getHeaderEl());
       saveStore();
       await saveScriptsForCurrentScope(currentScripts.concat(importedEntries.map((entry) => entry.script)), ctx);
@@ -1144,13 +1079,11 @@
       const validGroupIds = new Set(store.groups.map((group) => group.id));
       const shouldPruneMissingItems = scope === 'global' && items.length > 0;
       const canPruneSnapshotItems = items.length > 0;
-      const protectedPendingKeys = new Set((pendingImportedAssignments || []).map((entry) => entry.tempAssignmentKey).filter(Boolean));
       let changed = false;
 
       for (const [itemId, groupId] of Object.entries(store.assignments)) {
         const missingInCurrentView = !validItemIds.has(itemId);
         const invalidGroup = groupId && !validGroupIds.has(groupId);
-        if (protectedPendingKeys.has(itemId)) continue;
         if ((shouldPruneMissingItems && missingInCurrentView) || invalidGroup) {
           delete store.assignments[itemId];
           changed = true;
@@ -1186,7 +1119,6 @@
 
         for (const itemId of Object.keys(snapshot)) {
           const missingInCurrentView = !validItemIds.has(itemId);
-          if (protectedPendingKeys.has(itemId)) continue;
           if (canPruneSnapshotItems && missingInCurrentView) {
             delete snapshot[itemId];
             changed = true;
@@ -1324,8 +1256,6 @@
 
     function getAssignmentHelpers() {
       return {
-        queueImportedAssignments,
-        alignImportedAssignments,
         migrateLegacyAssignments,
         cleanupAssignments,
         syncAssignmentsFromRenderedLayout,
@@ -1764,7 +1694,6 @@
       try {
         const items = collectItems(listEl);
         migrateLegacyAssignments(items);
-        if (alignImportedAssignments(items)) saveStore();
         cleanupAssignments(items);
         renderGroupedList(items);
         syncNativeSortableOptions(listEl);

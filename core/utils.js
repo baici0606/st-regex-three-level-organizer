@@ -219,22 +219,11 @@
   async function downloadTextFile(fileName, content, mimeType = 'application/json;charset=utf-8') {
     const suggestedName = normalizeName(fileName) || 'export.json';
     const blobMimeType = normalizeName(mimeType) || 'application/json;charset=utf-8';
-    const pickerAcceptMime = blobMimeType.split(';', 1)[0] || 'application/json';
 
     if (typeof window.showSaveFilePicker === 'function') {
       try {
-        const extensionMatch = suggestedName.match(/(\.[^./\\]+)$/);
-        const extension = extensionMatch?.[1] || '.json';
         const handle = await window.showSaveFilePicker({
-          suggestedName,
-          types: [
-            {
-              description: '导出文件',
-              accept: {
-                [pickerAcceptMime]: [extension]
-              }
-            }
-          ]
+          suggestedName
         });
         const writable = await handle.createWritable();
         await writable.write(content);

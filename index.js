@@ -1143,6 +1143,7 @@
       const validGroupIds = new Set(store.groups.map((group) => group.id));
       const shouldPruneMissingItems = scope === 'global' && items.length > 0;
       const canPruneSnapshotItems = items.length > 0;
+      const protectedPendingKeys = new Set((pendingImportedAssignments || []).map((entry) => entry.tempAssignmentKey).filter(Boolean));
       const currentScriptsByItemId = getScriptsByItemId();
       let changed = false;
 

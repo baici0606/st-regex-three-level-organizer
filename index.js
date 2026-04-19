@@ -334,6 +334,7 @@
     let lastRenderedGroupSignature = '';
     let selectedGroupId = UNGROUPED_ID;
     let pendingViewportRestore = null;
+    let pendingImportedAssignments = [];
     let panelCollapsed = !!loadJson(PANEL_COLLAPSED_KEY, false);
 
     function pauseListObserver() {
@@ -634,12 +635,14 @@
       linkEl.download = fileName;
       linkEl.style.display = 'none';
       linkEl.rel = 'noopener';
+      linkEl.target = '_blank';
       document.body.appendChild(linkEl);
-      linkEl.click();
+      if (typeof linkEl.click === 'function') linkEl.click();
+      linkEl.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
       window.setTimeout(() => {
         linkEl.remove();
         URL.revokeObjectURL(objectUrl);
-      }, 2000);
+      }, 5000);
     }
 
     async function pickImportFile() {
@@ -819,12 +822,29 @@
       }
 
       const currentScripts = getScriptsByCurrentScope();
-      const assignedScriptIds = new Set(
-        Object.entries(store.assignments)
-          .filter(([, assignedGroupId]) => assignedGroupId === groupId)
-          .map(([itemId]) => normalizeName(itemId).startsWith('dom:') ? normalizeName(itemId).slice(4) : '')
-          .filter(Boolean)
+      const items = collectItems();
+      const itemIdsForGroup = new Set(
+        items
+          .filter((item) => store.assignments[item.id] === groupId)
+          .map((item) => item.id)
       );
+
+      for (const [itemId, assignedGroupId] of Object.entries(store.assignments)) {
+        if (assignedGroupId === groupId) itemIdsForGroup.add(itemId);
+      }
+
+      const assignedScriptIds = new Set();
+      for (const item of items) {
+        if (!itemIdsForGroup.has(item.id)) continue;
+        const itemKey = normalizeName(item.keyCandidate);
+        if (itemKey) assignedScriptIds.add(itemKey);
+      }
+
+      for (const itemId of itemIdsForGroup) {
+        if (normalizeName(itemId).startsWith('dom:')) {
+          assignedScriptIds.add(normalizeName(itemId).slice(4));
+        }
+      }
 
       const exportedScripts = currentScripts
         .filter((script) => {
@@ -887,27 +907,38 @@
       store.groups = orderedGroups.map((group, index) => ({ ...group, order: index + 1 }));
     }
 
-    function alignImportedAssignments(importedEntries, groupId, items = collectItems()) {
-      if (!Array.isArray(importedEntries) || importedEntries.length < 1) return false;
+    function queueImportedAssignments(importedEntries, groupId) {
+      if (!Array.isArray(importedEntries) || importedEntries.length < 1) return;
 
-      const pendingEntries = importedEntries.map((entry) => ({
-        ...entry,
-        targetName: normalizeName(entry?.script?.scriptName || entry?.script?.name || '')
-      }));
+      pendingImportedAssignments = importedEntries.map((entry) => ({
+        groupId,
+        scriptId: normalizeName(entry?.script?.id),
+        targetName: normalizeName(entry?.script?.scriptName || entry?.script?.name || ''),
+        tempAssignmentKey: `dom:${entry?.script?.id || ''}`
+      })).filter((entry) => entry.scriptId || entry.targetName);
+    }
+
+    function alignImportedAssignments(items = collectItems()) {
+      if (!Array.isArray(pendingImportedAssignments) || pendingImportedAssignments.length < 1) return false;
+
+      const pendingEntries = pendingImportedAssignments.map((entry) => ({ ...entry }));
       let changed = false;
+      const usedItemIds = new Set();
 
       for (const item of items) {
+        if (usedItemIds.has(item.id)) continue;
         const itemKey = normalizeName(item.keyCandidate);
         const itemName = normalizeName(item.name);
         const matchedIndex = pendingEntries.findIndex((entry) => {
-          const scriptId = normalizeName(entry?.script?.id);
-          if (scriptId && itemKey && itemKey === scriptId) return true;
+          if (entry.scriptId && itemKey && itemKey === entry.scriptId) return true;
           return !!entry.targetName && !!itemName && entry.targetName === itemName;
         });
         if (matchedIndex < 0) continue;
 
         const [matchedEntry] = pendingEntries.splice(matchedIndex, 1);
-        const tempAssignmentKey = `dom:${matchedEntry.script.id}`;
+        const tempAssignmentKey = matchedEntry.tempAssignmentKey;
+        const groupId = matchedEntry.groupId;
+        usedItemIds.add(item.id);
 
         if (store.assignments[tempAssignmentKey] !== undefined && tempAssignmentKey !== item.id) {
           delete store.assignments[tempAssignmentKey];
@@ -925,6 +956,8 @@
           changed = true;
         }
       }
+
+      pendingImportedAssignments = pendingEntries;
 
       return changed;
     }
@@ -1023,13 +1056,11 @@
         store.assignments[`dom:${entry.script.id}`] = nextGroupId;
       }
 
+      queueImportedAssignments(importedEntries, nextGroupId);
       pendingViewportRestore = captureViewportState(getHeaderEl());
       saveStore();
       await saveScriptsForCurrentScope(currentScripts.concat(importedEntries.map((entry) => entry.script)), ctx);
       await reloadRegexUi(ctx);
-      if (alignImportedAssignments(importedEntries, nextGroupId, collectItems())) {
-        saveStore();
-      }
       await renderTree();
 
       const scopeHint = bundle.sourceScope ? `（来源：${bundle.sourceScope}）` : '';
@@ -1086,11 +1117,13 @@
       const validGroupIds = new Set(store.groups.map((group) => group.id));
       const shouldPruneMissingItems = scope === 'global' && items.length > 0;
       const canPruneSnapshotItems = items.length > 0;
+      const protectedPendingKeys = new Set((pendingImportedAssignments || []).map((entry) => entry.tempAssignmentKey).filter(Boolean));
       let changed = false;
 
       for (const [itemId, groupId] of Object.entries(store.assignments)) {
         const missingInCurrentView = !validItemIds.has(itemId);
         const invalidGroup = groupId && !validGroupIds.has(groupId);
+        if (protectedPendingKeys.has(itemId)) continue;
         if ((shouldPruneMissingItems && missingInCurrentView) || invalidGroup) {
           delete store.assignments[itemId];
           changed = true;
@@ -1126,6 +1159,7 @@
 
         for (const itemId of Object.keys(snapshot)) {
           const missingInCurrentView = !validItemIds.has(itemId);
+          if (protectedPendingKeys.has(itemId)) continue;
           if (canPruneSnapshotItems && missingInCurrentView) {
             delete snapshot[itemId];
             changed = true;
@@ -1285,18 +1319,21 @@
           <span class="st-rmg-folder-handle" draggable="true" title="拖动排序" aria-label="拖动排序">&#8801;</span>
           <span class="st-rmg-group-name">${escapeHtml(title)}</span>
           <span class="st-rmg-group-count">(${count})</span>
+          ${groupId !== UNGROUPED_ID ? `
+            <span class="st-rmg-folder-actions">
+              <button type="button" class="menu_button interactable st-rmg-folder-action" data-folder-export="${escapeHtml(groupId)}" title="导出当前${FOLDER_LABEL}" aria-label="导出当前${FOLDER_LABEL}">
+                <span class="st-rmg-folder-export-icon" aria-hidden="true">
+                  <span class="st-rmg-folder-export-arrow">↑</span>
+                  <span class="st-rmg-folder-export-tray"></span>
+                </span>
+              </button>
+            </span>
+          ` : ''}
           <button type="button" class="st-rmg-folder-switch ${folderState === STATE_DISABLED ? 'is-off' : 'is-on'}" data-folder-toggle="${escapeHtml(groupId)}" title="${escapeHtml(toggleTitle)}" aria-pressed="${folderState === STATE_DISABLED ? 'false' : 'true'}">
             <span class="st-rmg-folder-switch-track">
               <span class="st-rmg-folder-switch-thumb"></span>
             </span>
           </button>
-          ${groupId !== UNGROUPED_ID ? `
-            <span class="st-rmg-folder-actions">
-              <button type="button" class="menu_button interactable st-rmg-folder-action" data-folder-export="${escapeHtml(groupId)}" title="导出当前${FOLDER_LABEL}" aria-label="导出当前${FOLDER_LABEL}">
-                <span aria-hidden="true">⤴</span>
-              </button>
-            </span>
-          ` : ''}
           <span class="st-rmg-group-arrow">${store.collapsed[groupId] ? '>' : 'v'}</span>
         `;
         fragment.appendChild(header);
@@ -1656,6 +1693,7 @@
       try {
         const items = collectItems(listEl);
         migrateLegacyAssignments(items);
+        if (alignImportedAssignments(items)) saveStore();
         cleanupAssignments(items);
         renderGroupedList(items);
         syncNativeSortableOptions(listEl);

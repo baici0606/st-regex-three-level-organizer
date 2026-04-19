@@ -511,6 +511,55 @@
       store.groups = orderedGroups.map((group, index) => ({ ...group, order: index + 1 }));
     }
 
+    function queueImportedAssignments(importedEntries, groupId) {
+      if (!Array.isArray(importedEntries) || importedEntries.length < 1) return;
+
+      pendingImportedAssignments = importedEntries.map((entry) => ({
+        groupId,
+        scriptId: normalizeName(entry?.script?.id),
+        tempAssignmentKey: `dom:${entry?.script?.id || ''}`
+      })).filter((entry) => entry.scriptId);
+    }
+
+    function alignImportedAssignments(items = collectItems()) {
+      if (!Array.isArray(pendingImportedAssignments) || pendingImportedAssignments.length < 1) return false;
+
+      const pendingEntries = pendingImportedAssignments.map((entry) => ({ ...entry }));
+      let changed = false;
+      const usedItemIds = new Set();
+
+      for (const item of items) {
+        if (usedItemIds.has(item.id)) continue;
+        const itemKey = normalizeName(item.keyCandidate);
+        const matchedIndex = pendingEntries.findIndex((entry) => !!entry.scriptId && !!itemKey && itemKey === entry.scriptId);
+        if (matchedIndex < 0) continue;
+
+        const [matchedEntry] = pendingEntries.splice(matchedIndex, 1);
+        const tempAssignmentKey = matchedEntry.tempAssignmentKey;
+        const groupId = matchedEntry.groupId;
+        usedItemIds.add(item.id);
+
+        if (store.assignments[tempAssignmentKey] !== undefined && tempAssignmentKey !== item.id) {
+          delete store.assignments[tempAssignmentKey];
+          changed = true;
+        }
+
+        if (store.assignments[item.id] !== groupId) {
+          store.assignments[item.id] = groupId;
+          changed = true;
+        }
+
+        if (store.disabledSnapshots?.[groupId] && Object.prototype.hasOwnProperty.call(store.disabledSnapshots[groupId], tempAssignmentKey)) {
+          store.disabledSnapshots[groupId][item.id] = store.disabledSnapshots[groupId][tempAssignmentKey];
+          delete store.disabledSnapshots[groupId][tempAssignmentKey];
+          changed = true;
+        }
+      }
+
+      pendingImportedAssignments = pendingEntries;
+      return changed;
+    }
+
     async function importGroup(anchorGroupId = '') {
       const file = await pickImportFile(`${EXPORT_FILE_EXTENSION},application/json,.json`);
       if (!file) return;
@@ -1604,51 +1653,3 @@
     createPanelController
   };
 })();
-    function queueImportedAssignments(importedEntries, groupId) {
-      if (!Array.isArray(importedEntries) || importedEntries.length < 1) return;
-
-      pendingImportedAssignments = importedEntries.map((entry) => ({
-        groupId,
-        scriptId: normalizeName(entry?.script?.id),
-        tempAssignmentKey: `dom:${entry?.script?.id || ''}`
-      })).filter((entry) => entry.scriptId);
-    }
-
-    function alignImportedAssignments(items = collectItems()) {
-      if (!Array.isArray(pendingImportedAssignments) || pendingImportedAssignments.length < 1) return false;
-
-      const pendingEntries = pendingImportedAssignments.map((entry) => ({ ...entry }));
-      let changed = false;
-      const usedItemIds = new Set();
-
-      for (const item of items) {
-        if (usedItemIds.has(item.id)) continue;
-        const itemKey = normalizeName(item.keyCandidate);
-        const matchedIndex = pendingEntries.findIndex((entry) => !!entry.scriptId && !!itemKey && itemKey === entry.scriptId);
-        if (matchedIndex < 0) continue;
-
-        const [matchedEntry] = pendingEntries.splice(matchedIndex, 1);
-        const tempAssignmentKey = matchedEntry.tempAssignmentKey;
-        const groupId = matchedEntry.groupId;
-        usedItemIds.add(item.id);
-
-        if (store.assignments[tempAssignmentKey] !== undefined && tempAssignmentKey !== item.id) {
-          delete store.assignments[tempAssignmentKey];
-          changed = true;
-        }
-
-        if (store.assignments[item.id] !== groupId) {
-          store.assignments[item.id] = groupId;
-          changed = true;
-        }
-
-        if (store.disabledSnapshots?.[groupId] && Object.prototype.hasOwnProperty.call(store.disabledSnapshots[groupId], tempAssignmentKey)) {
-          store.disabledSnapshots[groupId][item.id] = store.disabledSnapshots[groupId][tempAssignmentKey];
-          delete store.disabledSnapshots[groupId][tempAssignmentKey];
-          changed = true;
-        }
-      }
-
-      pendingImportedAssignments = pendingEntries;
-      return changed;
-    }

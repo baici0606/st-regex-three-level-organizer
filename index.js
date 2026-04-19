@@ -388,14 +388,11 @@
       return store.groups.find((group) => group.id === groupId) || null;
     }
 
-    function getFolderState(groupId, items = collectItems()) {
-      const folderItems = groupId === UNGROUPED_ID
-        ? items.filter((item) => !store.assignments[item.id])
-        : items.filter((item) => store.assignments[item.id] === groupId);
-
-      if (folderItems.length < 1) return STATE_ENABLED;
-      return store.disabledFolders?.[groupId] ? STATE_DISABLED : STATE_ENABLED;
-    }
+  function getFolderState(groupId, items = collectItems()) {
+    const folderScriptIds = getFolderScriptIds(groupId);
+    if (folderScriptIds.size < 1) return STATE_ENABLED;
+    return store.disabledFolders?.[groupId] ? STATE_DISABLED : STATE_ENABLED;
+  }
 
     function getScriptType() {
       if (scope === 'global') return 0;
@@ -420,16 +417,53 @@
       return [];
     }
 
-    function getScriptsByItemId(currentScripts = getScriptsByCurrentScope()) {
-      return new Map(
-        currentScripts
-          .filter((script) => script && typeof script === 'object' && normalizeName(script.id))
-          .map((script) => {
-            const scriptId = normalizeName(script.id);
-            return [`dom:${scriptId}`, script];
-          })
-      );
+  function getScriptsByItemId(currentScripts = getScriptsByCurrentScope()) {
+    return new Map(
+      currentScripts
+        .filter((script) => script && typeof script === 'object' && normalizeName(script.id))
+        .map((script) => {
+          const scriptId = normalizeName(script.id);
+          return [`dom:${scriptId}`, script];
+        })
+    );
+  }
+
+  function getScriptIdFromItemId(itemId) {
+    const normalizedItemId = normalizeName(itemId);
+    if (!normalizedItemId.startsWith('dom:')) return '';
+    return normalizeName(normalizedItemId.slice(4));
+  }
+
+  function getFolderScriptIds(groupId, currentScripts = getScriptsByCurrentScope()) {
+    const validGroupIds = new Set(store.groups.map((group) => group.id));
+    const currentScriptIds = new Set(
+      currentScripts
+        .map((script) => normalizeName(script?.id))
+        .filter(Boolean)
+    );
+    const assignedGroupIdsByScriptId = new Map();
+
+    for (const [itemId, assignedGroupId] of Object.entries(store.assignments || {})) {
+      const scriptId = getScriptIdFromItemId(itemId);
+      if (!scriptId || !currentScriptIds.has(scriptId)) continue;
+
+      const normalizedGroupId = assignedGroupId ? String(assignedGroupId) : null;
+      if (normalizedGroupId && !validGroupIds.has(normalizedGroupId)) continue;
+      if (!assignedGroupIdsByScriptId.has(scriptId)) {
+        assignedGroupIdsByScriptId.set(scriptId, normalizedGroupId);
+      }
     }
+
+    const targetGroupId = groupId === UNGROUPED_ID ? null : String(groupId);
+    const folderScriptIds = new Set();
+    for (const scriptId of currentScriptIds) {
+      const assignedGroupId = assignedGroupIdsByScriptId.get(scriptId) ?? null;
+      const belongsToGroup = targetGroupId === null ? assignedGroupId === null : assignedGroupId === targetGroupId;
+      if (belongsToGroup) folderScriptIds.add(scriptId);
+    }
+
+    return folderScriptIds;
+  }
 
     function generateUniqueScriptId(existingIds) {
       let nextId = '';
@@ -463,29 +497,48 @@
       }
     }
 
-    async function reloadRegexUi(ctx = getCtx()) {
-      if (typeof window.loadRegexScripts === 'function') {
-        await window.loadRegexScripts();
+  async function reloadRegexUi(ctx = getCtx()) {
+    if (typeof window.loadRegexScripts === 'function') {
+      await window.loadRegexScripts();
+    } else {
+      await new Promise((resolve) => window.setTimeout(resolve, 80));
+    }
+    const currentChatId = ctx?.getCurrentChatId?.();
+    if (currentChatId) {
+      await ctx?.reloadCurrentChat?.();
+    }
+    await new Promise((resolve) => schedule(resolve));
+  }
+
+  function getFolderItemIds(groupId, items = collectItems(), currentScripts = getScriptsByCurrentScope()) {
+    const folderScriptIds = getFolderScriptIds(groupId, currentScripts);
+    const itemIds = new Set();
+
+    for (const item of items) {
+      const scriptId = normalizeName(item.keyCandidate) || getScriptIdFromItemId(item.id);
+      if (scriptId && folderScriptIds.has(scriptId)) {
+        itemIds.add(item.id);
+        continue;
       }
-      const currentChatId = ctx?.getCurrentChatId?.();
-      if (currentChatId) {
-        await ctx?.reloadCurrentChat?.();
+
+      if (groupId === UNGROUPED_ID && !scriptId && !store.assignments[item.id]) {
+        itemIds.add(item.id);
       }
-      await new Promise((resolve) => schedule(resolve));
     }
 
-    function getFolderItemIds(groupId, items = collectItems()) {
-      return items
-        .filter((item) => (groupId === UNGROUPED_ID ? !store.assignments[item.id] : store.assignments[item.id] === groupId))
-        .map((item) => item.id);
+    for (const scriptId of folderScriptIds) {
+      itemIds.add(`dom:${scriptId}`);
     }
+
+    return Array.from(itemIds);
+  }
 
     async function applyFolderDisabledState(groupId, enabled, items = collectItems()) {
       const ctx = getCtx();
       const currentScripts = getScriptsByCurrentScope(ctx);
       if (!Array.isArray(currentScripts) || currentScripts.length < 1) return false;
 
-      const targetItemIds = getFolderItemIds(groupId, items);
+    const targetItemIds = getFolderItemIds(groupId, items, currentScripts);
       if (targetItemIds.length < 1) {
         if (store.disabledSnapshots?.[groupId]) {
           delete store.disabledSnapshots[groupId];
@@ -550,10 +603,10 @@
       return true;
     }
 
-    async function setFolderEnabled(groupId, enabled) {
-      const items = collectItems();
-      const itemIds = new Set(getFolderItemIds(groupId, items));
-      if (itemIds.size < 1) return;
+  async function setFolderEnabled(groupId, enabled) {
+    const items = collectItems();
+    const itemIds = new Set(getFolderItemIds(groupId, items, getScriptsByCurrentScope()));
+    if (itemIds.size < 1) return;
 
       pendingViewportRestore = captureViewportState(getHeaderEl());
 
@@ -937,15 +990,34 @@
       store.groups = orderedGroups.map((group, index) => ({ ...group, order: index + 1 }));
     }
 
-    function queueImportedAssignments(importedEntries, groupId) {
-      if (!Array.isArray(importedEntries) || importedEntries.length < 1) return;
+  function queueImportedAssignments(importedEntries, groupId) {
+    if (!Array.isArray(importedEntries) || importedEntries.length < 1) return;
 
-      pendingImportedAssignments = importedEntries.map((entry) => ({
-        groupId,
+    pendingImportedAssignments = importedEntries.map((entry) => ({
+      groupId,
         scriptId: normalizeName(entry?.script?.id),
-        tempAssignmentKey: `dom:${entry?.script?.id || ''}`
-      })).filter((entry) => entry.scriptId);
-    }
+      tempAssignmentKey: `dom:${entry?.script?.id || ''}`
+    })).filter((entry) => entry.scriptId);
+  }
+
+  function queuePostImportRenderRetries(attempt = 1, maxAttempts = 4) {
+    if (attempt > maxAttempts) return;
+
+    const delayMs = attempt * 120;
+    window.setTimeout(() => {
+      schedule(() => {
+        if (!Array.isArray(pendingImportedAssignments) || pendingImportedAssignments.length < 1) return;
+
+        Promise.resolve(renderTree())
+          .catch(() => {})
+          .finally(() => {
+            if (pendingImportedAssignments.length > 0) {
+              queuePostImportRenderRetries(attempt + 1, maxAttempts);
+            }
+          });
+      });
+    }, delayMs);
+  }
 
     function alignImportedAssignments(items = collectItems()) {
       if (!Array.isArray(pendingImportedAssignments) || pendingImportedAssignments.length < 1) return false;
@@ -1080,16 +1152,17 @@
         store.assignments[`dom:${entry.script.id}`] = nextGroupId;
       }
 
-      queueImportedAssignments(importedEntries, nextGroupId);
-      pendingViewportRestore = captureViewportState(getHeaderEl());
-      saveStore();
-      await saveScriptsForCurrentScope(currentScripts.concat(importedEntries.map((entry) => entry.script)), ctx);
-      await reloadRegexUi(ctx);
-      await renderTree();
+    queueImportedAssignments(importedEntries, nextGroupId);
+    pendingViewportRestore = captureViewportState(getHeaderEl());
+    saveStore();
+    await saveScriptsForCurrentScope(currentScripts.concat(importedEntries.map((entry) => entry.script)), ctx);
+    await reloadRegexUi(ctx);
+    await renderTree();
+    queuePostImportRenderRetries();
 
-      const scopeHint = bundle.sourceScope ? `（来源：${bundle.sourceScope}）` : '';
-      toast(`已导入${FOLDER_LABEL}“${nextGroupName}”${scopeHint}`, 'success');
-    }
+    const scopeHint = bundle.sourceScope ? `（来源：${bundle.sourceScope}）` : '';
+    toast(`已导入${FOLDER_LABEL}“${nextGroupName}”${scopeHint}`, 'success');
+  }
 
     function collectItems(listEl = getListEl()) {
       return getDirectScriptItems(listEl).map((itemEl, index) => ({

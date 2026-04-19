@@ -919,8 +919,10 @@
         }
         header.innerHTML = `
           <span class="st-rmg-folder-handle" draggable="true" title="拖动排序" aria-label="拖动排序">&#8801;</span>
-          <span class="st-rmg-group-name">${escapeHtml(title)}</span>
-          <span class="st-rmg-group-count">(${count})</span>
+          <span class="st-rmg-group-labels">
+            <span class="st-rmg-group-name">${escapeHtml(title)}</span>
+            <span class="st-rmg-group-count">(${count})</span>
+          </span>
           <span class="st-rmg-folder-controls">
             ${groupId !== UNGROUPED_ID ? `
               <span class="st-rmg-folder-actions">

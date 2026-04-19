@@ -127,8 +127,16 @@
   padding-right: 6px;
 }
 
-.st-rmg-group-name {
+.st-rmg-group-labels {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
   flex: 1 1 auto;
+  min-width: 0;
+}
+
+.st-rmg-group-name {
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -138,7 +146,7 @@
 .st-rmg-folder-controls {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
   margin-left: auto;
   flex: 0 0 auto;
   min-width: fit-content;
@@ -261,10 +269,6 @@
   pointer-events: none;
 }
 
-.st-rmg-group-count {
-  opacity: 0.7;
-}
-
 .st-rmg-group-arrow {
   flex: 0 0 auto;
   margin-left: 0;
@@ -276,6 +280,8 @@
 
 .st-rmg-group-count {
   flex: 0 0 auto;
+  margin-left: 0;
+  opacity: 0.7;
 }
 
 .st-rmg-folder-item-disabled {

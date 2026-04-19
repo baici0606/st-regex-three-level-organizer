@@ -1285,7 +1285,7 @@
       return [
         {
           type: 'export',
-          dataset: 'folderExport',
+          dataset: 'folder-export',
           value: groupId,
           title: `导出当前${FOLDER_LABEL}`,
           ariaLabel: `导出当前${FOLDER_LABEL}`
@@ -1353,13 +1353,15 @@
         const folderActions = getFolderActionDefinitions(groupId);
         header.innerHTML = `
           <span class="st-rmg-folder-handle" draggable="true" title="拖动排序" aria-label="拖动排序">&#8801;</span>
-          <span class="st-rmg-group-name">${escapeHtml(title)}</span>
-          <span class="st-rmg-group-count">(${count})</span>
+          <span class="st-rmg-group-labels">
+            <span class="st-rmg-group-name">${escapeHtml(title)}</span>
+            <span class="st-rmg-group-count">(${count})</span>
+          </span>
           <span class="st-rmg-folder-controls">
             ${folderActions.length ? `
               <span class="st-rmg-folder-actions">
                 ${folderActions.map((action) => `
-                <button type="button" class="menu_button interactable st-rmg-folder-action" data-${action.dataset}="${escapeHtml(action.value)}" title="${escapeHtml(action.title)}" aria-label="${escapeHtml(action.ariaLabel)}">
+                <button type="button" class="menu_button interactable st-rmg-folder-action" data-folder-export="${escapeHtml(action.value)}" title="${escapeHtml(action.title)}" aria-label="${escapeHtml(action.ariaLabel)}">
                   <span class="st-rmg-folder-export-icon" aria-hidden="true">
                     <span class="st-rmg-folder-export-arrow">↑</span>
                     <span class="st-rmg-folder-export-tray"></span>

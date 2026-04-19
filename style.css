@@ -155,6 +155,11 @@
   flex-shrink: 0;
 }
 
+.st-rmg-group-header[data-group-id="__ungrouped__"] .st-rmg-folder-controls {
+  min-width: 76px;
+  justify-content: flex-end;
+}
+
 .st-rmg-sort-anchor + .st-rmg-group-header,
 .st-rmg-group-header[data-group-id="__ungrouped__"] {
   width: 100%;

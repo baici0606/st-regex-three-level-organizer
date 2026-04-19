@@ -4,10 +4,6 @@
   const ROOT_KEY = 'STRegexManualGroups';
   const root = window[ROOT_KEY] = window[ROOT_KEY] || {};
 
-  if (root.loader?.loadPromise) {
-    return;
-  }
-
   function resolveBaseUrl() {
     const currentSrc = document.currentScript?.src;
     if (currentSrc) {
@@ -27,6 +23,23 @@
 
   function buildModuleUrl(baseUrl, relativePath) {
     return new URL(relativePath, baseUrl).href;
+  }
+
+  function getVersionToken(baseUrl) {
+    try {
+      const matchedScript = Array.from(document.querySelectorAll('script[src]')).find((scriptEl) => {
+        try {
+          return new URL(scriptEl.src, window.location.href).href.startsWith(baseUrl)
+            && /(?:^|\/)index\.js(?:[?#].*)?$/.test(String(scriptEl.getAttribute('src') || ''));
+        } catch {
+          return false;
+        }
+      });
+      const scriptUrl = matchedScript?.src ? new URL(matchedScript.src, window.location.href) : null;
+      return scriptUrl?.searchParams?.get('v') || scriptUrl?.search || `ts=${Date.now()}`;
+    } catch {
+      return `ts=${Date.now()}`;
+    }
   }
 
   function logLoader(level, ...args) {
@@ -80,6 +93,7 @@
 
   async function bootstrapModules() {
     const baseUrl = resolveBaseUrl();
+    const versionToken = getVersionToken(baseUrl);
     const modulePaths = [
       'core/constants.js',
       'core/utils.js',
@@ -90,9 +104,10 @@
 
     root.loader.baseUrl = baseUrl;
     root.loader.modulePaths = modulePaths.slice();
+    root.loader.versionToken = versionToken;
 
     for (const relativePath of modulePaths) {
-      const moduleUrl = buildModuleUrl(baseUrl, relativePath);
+      const moduleUrl = `${buildModuleUrl(baseUrl, relativePath)}${String(versionToken).startsWith('?') ? String(versionToken) : `?${versionToken}`}`;
       await loadScriptOnce(moduleUrl);
     }
 
@@ -105,6 +120,12 @@
 
   root.loader = root.loader || {};
   root.loader.version = 'module-loader-v1';
+  if (root.loader.loadPromise) {
+    if (typeof root.bootstrap?.init === 'function') {
+      root.bootstrap.init();
+    }
+    return;
+  }
   root.loader.loadPromise = bootstrapModules().catch((error) => {
     logLoader('error', error?.message || error, error);
     throw error;

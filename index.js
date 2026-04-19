@@ -628,20 +628,18 @@
         throw new Error('当前环境不支持文件导出');
       }
 
-      const blob = new Blob([content], { type: mimeType });
-      const objectUrl = URL.createObjectURL(blob);
-      const linkEl = document.createElement('a');
-      linkEl.href = objectUrl;
-      linkEl.download = fileName;
-      linkEl.style.display = 'none';
-      linkEl.rel = 'noopener';
-      linkEl.target = '_blank';
-      document.body.appendChild(linkEl);
-      if (typeof linkEl.click === 'function') linkEl.click();
-      linkEl.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-      window.setTimeout(() => {
-        linkEl.remove();
-        URL.revokeObjectURL(objectUrl);
+    const blob = new Blob([content], { type: mimeType });
+    const objectUrl = URL.createObjectURL(blob);
+    const linkEl = document.createElement('a');
+    linkEl.href = objectUrl;
+    linkEl.download = fileName;
+    linkEl.style.display = 'none';
+    linkEl.rel = 'noopener';
+    document.body.appendChild(linkEl);
+    linkEl.click();
+    window.setTimeout(() => {
+      linkEl.remove();
+      URL.revokeObjectURL(objectUrl);
       }, 5000);
     }
 
@@ -1370,13 +1368,13 @@
                 `).join('')}
               </span>
             ` : ''}
-          <button type="button" class="st-rmg-folder-switch ${folderState === STATE_DISABLED ? 'is-off' : 'is-on'}" data-folder-toggle="${escapeHtml(groupId)}" title="${escapeHtml(toggleTitle)}" aria-pressed="${folderState === STATE_DISABLED ? 'false' : 'true'}">
-            <span class="st-rmg-folder-switch-track">
-              <span class="st-rmg-folder-switch-thumb"></span>
-            </span>
-          </button>
+            <button type="button" class="st-rmg-folder-switch ${folderState === STATE_DISABLED ? 'is-off' : 'is-on'}" data-folder-toggle="${escapeHtml(groupId)}" title="${escapeHtml(toggleTitle)}" aria-pressed="${folderState === STATE_DISABLED ? 'false' : 'true'}">
+              <span class="st-rmg-folder-switch-track">
+                <span class="st-rmg-folder-switch-thumb"></span>
+              </span>
+            </button>
+            <span class="st-rmg-group-arrow">${store.collapsed[groupId] ? '>' : 'v'}</span>
           </span>
-          <span class="st-rmg-group-arrow">${store.collapsed[groupId] ? '>' : 'v'}</span>
         `;
         fragment.appendChild(header);
 

@@ -228,10 +228,8 @@
     linkEl.download = fileName;
     linkEl.style.display = 'none';
     linkEl.rel = 'noopener';
-    linkEl.target = '_blank';
     document.body.appendChild(linkEl);
-    if (typeof linkEl.click === 'function') linkEl.click();
-    linkEl.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+    linkEl.click();
     window.setTimeout(() => {
       linkEl.remove();
       URL.revokeObjectURL(objectUrl);

@@ -91,9 +91,11 @@
 
 .st-rmg-group-header {
   display: flex;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 6px;
-  width: calc(100% - 4px);
+  width: 100%;
+  min-width: 0;
   box-sizing: border-box;
   padding: 5px 10px;
   margin-top: 0;
@@ -126,7 +128,11 @@
 }
 
 .st-rmg-group-name {
+  flex: 1 1 auto;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .st-rmg-folder-controls {
@@ -134,14 +140,16 @@
   align-items: center;
   gap: 4px;
   margin-left: auto;
+  flex: 0 0 auto;
+  min-width: fit-content;
 }
 
 .st-rmg-folder-actions {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  margin-left: 0;
-  margin-right: 0;
+  flex: 0 0 auto;
+  margin: 0;
 }
 
 .st-rmg-folder-action.menu_button {
@@ -183,8 +191,8 @@
 }
 
 .st-rmg-folder-switch {
-  margin-left: 0;
-  margin-right: 6px;
+  flex: 0 0 auto;
+  margin: 0;
   padding: 0;
   border: 0;
   background: transparent;
@@ -266,6 +274,10 @@
   font-family: Consolas, monospace;
 }
 
+.st-rmg-group-count {
+  flex: 0 0 auto;
+}
+
 .st-rmg-folder-item-disabled {
   opacity: 0.58;
   filter: brightness(0.52) saturate(0.8);
@@ -295,19 +307,16 @@
   }
 
   .st-rmg-group-header {
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
   }
 
   .st-rmg-folder-actions {
-    order: 10;
-    margin-left: 0;
-    margin-right: 0;
-    justify-content: flex-start;
+    justify-content: center;
   }
 
   .st-rmg-folder-controls {
-    order: 10;
-    width: 100%;
+    width: auto;
+    min-width: fit-content;
     justify-content: flex-end;
   }
 

@@ -921,22 +921,24 @@
           <span class="st-rmg-folder-handle" draggable="true" title="拖动排序" aria-label="拖动排序">&#8801;</span>
           <span class="st-rmg-group-name">${escapeHtml(title)}</span>
           <span class="st-rmg-group-count">(${count})</span>
-          ${groupId !== UNGROUPED_ID ? `
-            <span class="st-rmg-folder-actions">
-              <button type="button" class="menu_button interactable st-rmg-folder-action" data-folder-export="${escapeHtml(groupId)}" title="导出当前${FOLDER_LABEL}" aria-label="导出当前${FOLDER_LABEL}">
-                <span class="st-rmg-folder-export-icon" aria-hidden="true">
-                  <span class="st-rmg-folder-export-arrow">↑</span>
-                  <span class="st-rmg-folder-export-tray"></span>
-                </span>
-              </button>
-            </span>
-          ` : ''}
-          <button type="button" class="st-rmg-folder-switch ${folderState === STATE_DISABLED ? 'is-off' : 'is-on'}" data-folder-toggle="${escapeHtml(groupId)}" title="${escapeHtml(toggleTitle)}" aria-pressed="${folderState === STATE_DISABLED ? 'false' : 'true'}">
-            <span class="st-rmg-folder-switch-track">
-              <span class="st-rmg-folder-switch-thumb"></span>
-            </span>
-          </button>
-          <span class="st-rmg-group-arrow">${store.collapsed[groupId] ? '>' : 'v'}</span>
+          <span class="st-rmg-folder-controls">
+            ${groupId !== UNGROUPED_ID ? `
+              <span class="st-rmg-folder-actions">
+                <button type="button" class="menu_button interactable st-rmg-folder-action" data-folder-export="${escapeHtml(groupId)}" title="导出当前${FOLDER_LABEL}" aria-label="导出当前${FOLDER_LABEL}">
+                  <span class="st-rmg-folder-export-icon" aria-hidden="true">
+                    <span class="st-rmg-folder-export-arrow">↑</span>
+                    <span class="st-rmg-folder-export-tray"></span>
+                  </span>
+                </button>
+              </span>
+            ` : ''}
+            <button type="button" class="st-rmg-folder-switch ${folderState === STATE_DISABLED ? 'is-off' : 'is-on'}" data-folder-toggle="${escapeHtml(groupId)}" title="${escapeHtml(toggleTitle)}" aria-pressed="${folderState === STATE_DISABLED ? 'false' : 'true'}">
+              <span class="st-rmg-folder-switch-track">
+                <span class="st-rmg-folder-switch-thumb"></span>
+              </span>
+            </button>
+            <span class="st-rmg-group-arrow">${store.collapsed[groupId] ? '>' : 'v'}</span>
+          </span>
         `;
         fragment.appendChild(header);
 

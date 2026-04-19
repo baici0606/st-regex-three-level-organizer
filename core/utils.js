@@ -218,19 +218,20 @@
 
   async function downloadTextFile(fileName, content, mimeType = 'application/json;charset=utf-8') {
     const suggestedName = normalizeName(fileName) || 'export.json';
+    const blobMimeType = normalizeName(mimeType) || 'application/json;charset=utf-8';
+    const pickerAcceptMime = blobMimeType.split(';', 1)[0] || 'application/json';
 
     if (typeof window.showSaveFilePicker === 'function') {
       try {
         const extensionMatch = suggestedName.match(/(\.[^./\\]+)$/);
         const extension = extensionMatch?.[1] || '.json';
-        const mime = normalizeName(mimeType) || 'application/json;charset=utf-8';
         const handle = await window.showSaveFilePicker({
           suggestedName,
           types: [
             {
               description: '导出文件',
               accept: {
-                [mime]: [extension]
+                [pickerAcceptMime]: [extension]
               }
             }
           ]
@@ -249,7 +250,7 @@
       throw new Error('当前环境不支持文件导出');
     }
 
-    const blob = new Blob([content], { type: mimeType });
+    const blob = new Blob([content], { type: blobMimeType });
     const objectUrl = URL.createObjectURL(blob);
     const linkEl = document.createElement('a');
     linkEl.href = objectUrl;

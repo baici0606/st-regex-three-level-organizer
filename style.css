@@ -95,6 +95,7 @@
   align-items: center;
   gap: 6px;
   width: 100%;
+  flex: 1 1 100%;
   min-width: 0;
   box-sizing: border-box;
   padding: 5px 10px;
@@ -128,11 +129,12 @@
 }
 
 .st-rmg-group-labels {
-  display: inline-flex;
+  display: flex;
   align-items: baseline;
   gap: 4px;
   flex: 1 1 auto;
   min-width: 0;
+  width: 100%;
 }
 
 .st-rmg-group-name {
@@ -144,12 +146,19 @@
 }
 
 .st-rmg-folder-controls {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 8px;
   margin-left: auto;
   flex: 0 0 auto;
   min-width: fit-content;
+  flex-shrink: 0;
+}
+
+.st-rmg-sort-anchor + .st-rmg-group-header,
+.st-rmg-group-header[data-group-id="__ungrouped__"] {
+  width: 100%;
+  align-self: stretch;
 }
 
 .st-rmg-folder-actions {

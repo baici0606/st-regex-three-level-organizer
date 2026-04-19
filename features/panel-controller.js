@@ -61,6 +61,7 @@
     const NEW_GROUP_ID = `${MODULE_NAME}-${scope}-new-group`;
     const RENAME_GROUP_ID = `${MODULE_NAME}-${scope}-rename-group`;
     const DELETE_GROUP_ID = `${MODULE_NAME}-${scope}-delete-group`;
+    const DELETE_GROUP_WITH_SCRIPTS_ID = `${MODULE_NAME}-${scope}-delete-group-with-scripts`;
     const IMPORT_GROUP_PANEL_ID = `${MODULE_NAME}-${scope}-import-group-panel`;
 
     let store = createDefaultStore();
@@ -947,6 +948,7 @@
           <button type="button" class="menu_button interactable" id="${IMPORT_GROUP_PANEL_ID}">导入${FOLDER_LABEL}</button>
           <button type="button" class="menu_button interactable" id="${RENAME_GROUP_ID}">重命名${FOLDER_LABEL}</button>
           <button type="button" class="menu_button interactable st-rmg-danger" id="${DELETE_GROUP_ID}">删除${FOLDER_LABEL}</button>
+          <button type="button" class="menu_button interactable st-rmg-danger" id="${DELETE_GROUP_WITH_SCRIPTS_ID}">删除${FOLDER_LABEL}及正则</button>
         </div>
         <select id="${GROUP_SELECT_ID}" class="text_pole st-rmg-group-select"></select>
       `;
@@ -965,8 +967,10 @@
       const canEditGroup = selectedGroupId !== UNGROUPED_ID && getGroups().some((group) => group.id === selectedGroupId);
       const renameBtn = containerEl.querySelector(`#${RENAME_GROUP_ID}`);
       const deleteBtn = containerEl.querySelector(`#${DELETE_GROUP_ID}`);
+      const deleteWithScriptsBtn = containerEl.querySelector(`#${DELETE_GROUP_WITH_SCRIPTS_ID}`);
       if (renameBtn) renameBtn.disabled = !canEditGroup;
       if (deleteBtn) deleteBtn.disabled = !canEditGroup;
+      if (deleteWithScriptsBtn) deleteWithScriptsBtn.disabled = !canEditGroup;
     }
 
     function renderGroupedList(items) {
@@ -1464,6 +1468,49 @@
       renderTree();
     }
 
+    async function deleteGroupAndScripts(groupId) {
+      const group = store.groups.find((entry) => entry.id === groupId);
+      if (!group || groupId === UNGROUPED_ID) return;
+
+      const ctx = getCtx();
+      const currentScripts = getScriptsByCurrentScope(ctx);
+      if (!Array.isArray(currentScripts)) {
+        toast('当前范围的正则列表不可用，删除失败', 'error');
+        return;
+      }
+
+      const folderItemIds = new Set(getFolderItemIds(groupId, collectItems(), currentScripts));
+      const targetScriptIds = new Set(
+        Array.from(folderItemIds)
+          .map((itemId) => getScriptIdFromItemId(itemId))
+          .filter(Boolean)
+      );
+      const removedCount = currentScripts.filter((script) => targetScriptIds.has(normalizeName(script?.id))).length;
+
+      const ok = await openConfirm(`删除${FOLDER_LABEL}“${group.name}”以及其中 ${removedCount} 条正则后将无法恢复，是否继续？`);
+      if (!ok) return;
+
+      const nextScripts = currentScripts.filter((script) => !targetScriptIds.has(normalizeName(script?.id)));
+      await saveScriptsForCurrentScope(nextScripts, ctx);
+
+      store.groups = store.groups.filter((entry) => entry.id !== groupId);
+      for (const itemId of Object.keys(store.assignments)) {
+        const assignedGroupId = store.assignments[itemId];
+        if (assignedGroupId === groupId || targetScriptIds.has(getScriptIdFromItemId(itemId))) {
+          delete store.assignments[itemId];
+        }
+      }
+      delete store.collapsed[groupId];
+      delete store.disabledFolders[groupId];
+      delete store.disabledSnapshots[groupId];
+
+      saveStore();
+      await reloadRegexUi(ctx);
+      refreshAllPanels();
+      await renderTree();
+      toast(`已删除${FOLDER_LABEL}“${group.name}”及其中 ${removedCount} 条正则`, 'success');
+    }
+
     async function renderTree() {
       const headerEl = getHeaderEl();
       const listEl = getListEl();
@@ -1547,6 +1594,15 @@
           e.stopPropagation();
           const selectEl = headerEl.querySelector(`#${GROUP_SELECT_ID}`);
           deleteGroup(String(selectEl?.value || ''));
+          return;
+        }
+
+        const deleteWithScriptsBtn = e.target?.closest?.(`#${DELETE_GROUP_WITH_SCRIPTS_ID}`);
+        if (deleteWithScriptsBtn) {
+          e.preventDefault();
+          e.stopPropagation();
+          const selectEl = headerEl.querySelector(`#${GROUP_SELECT_ID}`);
+          deleteGroupAndScripts(String(selectEl?.value || ''));
           return;
         }
       });

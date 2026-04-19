@@ -129,12 +129,19 @@
   min-width: 0;
 }
 
-.st-rmg-folder-actions {
+.st-rmg-folder-controls {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   margin-left: auto;
-  margin-right: 4px;
+}
+
+.st-rmg-folder-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 0;
+  margin-right: 0;
 }
 
 .st-rmg-folder-action.menu_button {
@@ -177,7 +184,7 @@
 
 .st-rmg-folder-switch {
   margin-left: 0;
-  margin-right: 0;
+  margin-right: 6px;
   padding: 0;
   border: 0;
   background: transparent;
@@ -252,6 +259,7 @@
 
 .st-rmg-group-arrow {
   flex: 0 0 auto;
+  margin-left: 0;
   width: 16px;
   text-align: center;
   opacity: 0.75;
@@ -292,9 +300,14 @@
 
   .st-rmg-folder-actions {
     order: 10;
-    width: 100%;
     margin-left: 0;
     margin-right: 0;
+    justify-content: flex-start;
+  }
+
+  .st-rmg-folder-controls {
+    order: 10;
+    width: 100%;
     justify-content: flex-end;
   }
 

@@ -633,10 +633,13 @@
       linkEl.href = objectUrl;
       linkEl.download = fileName;
       linkEl.style.display = 'none';
+      linkEl.rel = 'noopener';
       document.body.appendChild(linkEl);
       linkEl.click();
-      linkEl.remove();
-      schedule(() => URL.revokeObjectURL(objectUrl));
+      window.setTimeout(() => {
+        linkEl.remove();
+        URL.revokeObjectURL(objectUrl);
+      }, 2000);
     }
 
     async function pickImportFile() {
@@ -884,6 +887,48 @@
       store.groups = orderedGroups.map((group, index) => ({ ...group, order: index + 1 }));
     }
 
+    function alignImportedAssignments(importedEntries, groupId, items = collectItems()) {
+      if (!Array.isArray(importedEntries) || importedEntries.length < 1) return false;
+
+      const pendingEntries = importedEntries.map((entry) => ({
+        ...entry,
+        targetName: normalizeName(entry?.script?.scriptName || entry?.script?.name || '')
+      }));
+      let changed = false;
+
+      for (const item of items) {
+        const itemKey = normalizeName(item.keyCandidate);
+        const itemName = normalizeName(item.name);
+        const matchedIndex = pendingEntries.findIndex((entry) => {
+          const scriptId = normalizeName(entry?.script?.id);
+          if (scriptId && itemKey && itemKey === scriptId) return true;
+          return !!entry.targetName && !!itemName && entry.targetName === itemName;
+        });
+        if (matchedIndex < 0) continue;
+
+        const [matchedEntry] = pendingEntries.splice(matchedIndex, 1);
+        const tempAssignmentKey = `dom:${matchedEntry.script.id}`;
+
+        if (store.assignments[tempAssignmentKey] !== undefined && tempAssignmentKey !== item.id) {
+          delete store.assignments[tempAssignmentKey];
+          changed = true;
+        }
+
+        if (store.assignments[item.id] !== groupId) {
+          store.assignments[item.id] = groupId;
+          changed = true;
+        }
+
+        if (store.disabledSnapshots?.[groupId] && Object.prototype.hasOwnProperty.call(store.disabledSnapshots[groupId], tempAssignmentKey)) {
+          store.disabledSnapshots[groupId][item.id] = store.disabledSnapshots[groupId][tempAssignmentKey];
+          delete store.disabledSnapshots[groupId][tempAssignmentKey];
+          changed = true;
+        }
+      }
+
+      return changed;
+    }
+
     async function importGroup(anchorGroupId = '') {
       const file = await pickImportFile();
       if (!file) return;
@@ -982,6 +1027,9 @@
       saveStore();
       await saveScriptsForCurrentScope(currentScripts.concat(importedEntries.map((entry) => entry.script)), ctx);
       await reloadRegexUi(ctx);
+      if (alignImportedAssignments(importedEntries, nextGroupId, collectItems())) {
+        saveStore();
+      }
       await renderTree();
 
       const scopeHint = bundle.sourceScope ? `（来源：${bundle.sourceScope}）` : '';
@@ -1237,16 +1285,18 @@
           <span class="st-rmg-folder-handle" draggable="true" title="拖动排序" aria-label="拖动排序">&#8801;</span>
           <span class="st-rmg-group-name">${escapeHtml(title)}</span>
           <span class="st-rmg-group-count">(${count})</span>
-          ${groupId !== UNGROUPED_ID ? `
-            <span class="st-rmg-folder-actions">
-              <button type="button" class="menu_button interactable st-rmg-folder-action" data-folder-export="${escapeHtml(groupId)}" title="导出当前${FOLDER_LABEL}">导出</button>
-            </span>
-          ` : ''}
           <button type="button" class="st-rmg-folder-switch ${folderState === STATE_DISABLED ? 'is-off' : 'is-on'}" data-folder-toggle="${escapeHtml(groupId)}" title="${escapeHtml(toggleTitle)}" aria-pressed="${folderState === STATE_DISABLED ? 'false' : 'true'}">
             <span class="st-rmg-folder-switch-track">
               <span class="st-rmg-folder-switch-thumb"></span>
             </span>
           </button>
+          ${groupId !== UNGROUPED_ID ? `
+            <span class="st-rmg-folder-actions">
+              <button type="button" class="menu_button interactable st-rmg-folder-action" data-folder-export="${escapeHtml(groupId)}" title="导出当前${FOLDER_LABEL}" aria-label="导出当前${FOLDER_LABEL}">
+                <span aria-hidden="true">⤴</span>
+              </button>
+            </span>
+          ` : ''}
           <span class="st-rmg-group-arrow">${store.collapsed[groupId] ? '>' : 'v'}</span>
         `;
         fragment.appendChild(header);

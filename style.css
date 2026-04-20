@@ -1,6 +1,6 @@
 .st-rmg-header {
   margin-bottom: 4px;
-  padding: 6px;
+  padding: 8px 10px;
   border: 1px solid var(--mainColor, rgba(255, 255, 255, 0.2));
   border-radius: 10px;
   background: var(--SmartThemeBlurTintColor, rgba(0, 0, 0, 0.25));
@@ -11,14 +11,18 @@
   align-items: center;
   justify-content: flex-start;
   gap: 6px;
-  margin-bottom: 3px;
+  margin-bottom: 6px;
+}
+
+.st-rmg-panel-collapsed .st-rmg-title-row {
+  margin-bottom: 0;
 }
 
 .st-rmg-panel-toggle {
   user-select: none;
   cursor: pointer;
-  padding: 0;
-  border-radius: 8px;
+  padding: 4px 6px;
+  border-radius: 6px;
 }
 
 .st-rmg-panel-toggle:hover {
@@ -100,9 +104,9 @@
   max-width: 100%;
   align-self: stretch;
   box-sizing: border-box;
-  padding: 7px 10px;
-  margin-top: 2px;
-  margin-bottom: 2px;
+  padding: 5px 10px;
+  margin-top: 0;
+  margin-bottom: 0;
   border-radius: 8px;
   border: 1px solid var(--mainColor, rgba(255, 255, 255, 0.14));
   background: rgba(120, 160, 255, 0.08);

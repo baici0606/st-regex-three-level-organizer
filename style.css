@@ -62,47 +62,24 @@
 .st-rmg-group-manager {
   display: grid;
   width: 100%;
-  min-width: 0;
-  gap: 6px;
-}
-
-.st-rmg-group-actions-container {
-  display: grid;
-  width: 100%;
-  gap: 6px;
+  gap: 2px;
 }
 
 .st-rmg-group-actions {
-  display: grid;
-  gap: 6px;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 3px;
   align-items: center;
-  justify-content: start;
-  justify-items: start;
-}
-
-.st-rmg-group-actions-primary {
-  grid-template-columns: repeat(3, minmax(0, max-content));
-}
-
-.st-rmg-group-actions-danger {
-  grid-template-columns: repeat(2, minmax(0, max-content));
 }
 
 .st-rmg-group-actions>.menu_button {
-  min-width: 0;
-  max-width: 100%;
+  flex: 0 0 auto;
   white-space: nowrap;
-}
-
-.st-rmg-group-select-row {
-  width: 100%;
-  min-width: 0;
 }
 
 .st-rmg-group-select {
   width: 100%;
   min-width: 0;
-  margin-top: 0;
 }
 
 .st-rmg-empty {
@@ -155,6 +132,11 @@
   min-width: 26px;
   min-height: 28px;
   padding-right: 6px;
+}
+
+.st-rmg-system-folder .st-rmg-folder-handle {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 .st-rmg-group-labels {
@@ -218,6 +200,16 @@
 
 .st-rmg-folder-action-placeholder:disabled {
   opacity: 0.7;
+}
+
+.st-rmg-system-folder .st-rmg-folder-action-placeholder {
+  filter: saturate(0.15) brightness(0.78);
+}
+
+.st-rmg-system-folder .st-rmg-group-name::after {
+  content: ' · 系统';
+  font-size: 12px;
+  opacity: 0.55;
 }
 
 .st-rmg-folder-action.menu_button {
@@ -360,13 +352,6 @@
 
 .st-rmg-hidden {
   display: none !important;
-}
-
-@media (max-width: 900px) {
-  .st-rmg-group-actions {
-    display: flex;
-    flex-wrap: wrap;
-  }
 }
 
 @media (max-width: 700px) {

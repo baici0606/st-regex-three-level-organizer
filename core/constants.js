@@ -11,7 +11,7 @@
     GROUPING_CLASS: 'st-rmg-grouping',
     HIDDEN_CLASS: 'st-rmg-hidden',
     FOLDER_LABEL: '文件夹',
-    UNGROUPED_LABEL: '未分组',
+    UNGROUPED_LABEL: '未分类',
     STATE_ENABLED: 'enabled',
     STATE_DISABLED: 'disabled',
     EXPORT_BUNDLE_TYPE: 'st-rmg-folder-bundle',

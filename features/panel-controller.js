@@ -1,6 +1,5 @@
 (function () {
   'use strict';
-  console.log("=== ST-REGEX-THREE-LEVEL-ORGANIZER JS V2 is active ===");
 
   const root = window.STRegexManualGroups = window.STRegexManualGroups || {};
   if (root.features?.panelController) return;
@@ -16,14 +15,12 @@
     STATE_DISABLED,
     EXPORT_BUNDLE_TYPE,
     EXPORT_BUNDLE_VERSION,
-    EXPORT_FILE_EXTENSION
+    EXPORT_FILE_EXTENSION,
   } = root.constants;
 
   const {
     schedule,
     getCtx,
-    captureViewportState,
-    restoreViewportState,
     loadJson,
     saveJson,
     toast,
@@ -35,43 +32,38 @@
     getScriptName,
     getItemKeyCandidate,
     getItemId,
-    getLegacyItemId,
     getDirectScriptItems,
     getJQuery,
     openPrompt,
     openConfirm,
     downloadTextFile,
     pickImportFile,
-    readFileText
+    readFileText,
   } = root.utils;
 
   const {
     createDefaultStore,
-    sanitizeStore,
     getSortedGroups,
     getRegexPresetManager,
     getStoreKey,
     loadStoreForScope,
-    saveStoreByKey
+    saveStoreByKey,
   } = root.store;
 
   function createPanelController({ scope, blockId, listId, titleText }) {
     const HEADER_ID = `${MODULE_NAME}-${scope}-header`;
     const PANEL_COLLAPSED_KEY = `${MODULE_NAME}:${scope}:panel-collapsed`;
-
-    const activeNativeOrderCache = new Map();
     const GROUP_SELECT_ID = `${MODULE_NAME}-${scope}-group-select`;
     const NEW_GROUP_ID = `${MODULE_NAME}-${scope}-new-group`;
+    const IMPORT_GROUP_PANEL_ID = `${MODULE_NAME}-${scope}-import-group-panel`;
     const RENAME_GROUP_ID = `${MODULE_NAME}-${scope}-rename-group`;
     const DELETE_GROUP_ID = `${MODULE_NAME}-${scope}-delete-group`;
     const DELETE_GROUP_WITH_SCRIPTS_ID = `${MODULE_NAME}-${scope}-delete-group-with-scripts`;
-    const IMPORT_GROUP_PANEL_ID = `${MODULE_NAME}-${scope}-import-group-panel`;
 
     let store = createDefaultStore();
     let currentStoreKey = '';
-    let listObserver = null;
-    let domObserver = null;
     let rendering = false;
+    let domObserver = null;
     let sorting = false;
     let sortingItemId = '';
     let sortingTargetGroupId = undefined;
@@ -79,40 +71,7 @@
     let folderDropTargetId = '';
     let folderDropAfter = false;
     let lastFolderDragEndedAt = 0;
-    let lastRenderedGroupSignature = '';
-    let selectedGroupId = UNGROUPED_ID;
-    let pendingViewportRestore = null;
-    let pendingImportedAssignments = [];
-    let pendingImportedBaseline = null;
     let panelCollapsed = !!loadJson(PANEL_COLLAPSED_KEY, false);
-
-    function pauseListObserver() {
-      if (listObserver) listObserver.disconnect();
-    }
-
-    function loadStoreForCurrentContext() {
-      const nextStoreKey = getStoreKey(scope);
-      if (nextStoreKey === currentStoreKey) return false;
-
-      const loaded = loadStoreForScope(scope);
-      currentStoreKey = loaded.key;
-      store = loaded.store;
-      lastRenderedGroupSignature = '';
-      selectedGroupId = UNGROUPED_ID;
-      return true;
-    }
-
-    loadStoreForCurrentContext();
-
-    function saveStore() {
-      store = sanitizeStore(store);
-      if (!currentStoreKey) currentStoreKey = getStoreKey(scope);
-      saveStoreByKey(currentStoreKey, store);
-    }
-
-    function savePanelCollapsed() {
-      saveJson(PANEL_COLLAPSED_KEY, !!panelCollapsed);
-    }
 
     function getBlockEl() {
       return document.getElementById(blockId);
@@ -126,22 +85,30 @@
       return document.getElementById(HEADER_ID);
     }
 
+    function loadStoreForCurrentContext() {
+      const nextStoreKey = getStoreKey(scope);
+      if (nextStoreKey === currentStoreKey) return;
+
+      const loaded = loadStoreForScope(scope);
+      currentStoreKey = loaded.key;
+      store = loaded.store;
+    }
+
+    function saveStore() {
+      if (!currentStoreKey) currentStoreKey = getStoreKey(scope);
+      saveStoreByKey(currentStoreKey, store);
+    }
+
+    function savePanelCollapsed() {
+      saveJson(PANEL_COLLAPSED_KEY, !!panelCollapsed);
+    }
+
     function getGroups() {
       return getSortedGroups(store.groups);
     }
 
     function getGroupById(groupId) {
       return store.groups.find((group) => group.id === groupId) || null;
-    }
-
-    function getFolderState(groupId, items = collectItems(), currentScripts = getScriptsByCurrentScope()) {
-      if (!store.disabledFolders?.[groupId]) return STATE_ENABLED;
-
-      const validGroup = groupId === UNGROUPED_ID || store.groups.some((group) => group.id === groupId);
-      if (!validGroup) return STATE_ENABLED;
-
-      const targetItemIds = getFolderItemIds(groupId, items, currentScripts);
-      return targetItemIds.length > 0 ? STATE_DISABLED : STATE_ENABLED;
     }
 
     function getScriptType() {
@@ -154,11 +121,13 @@
     function getScriptsByCurrentScope(ctx = getCtx()) {
       const scriptType = getScriptType();
       if (scriptType === 0) return Array.isArray(ctx?.extensionSettings?.regex) ? ctx.extensionSettings.regex : [];
+
       if (scriptType === 1) {
         const character = ctx?.characters?.[ctx?.characterId];
         const scopedScripts = character?.data?.extensions?.regex_scripts;
         return Array.isArray(scopedScripts) ? scopedScripts : [];
       }
+
       if (scriptType === 2) {
         const presetManager = getRegexPresetManager(ctx);
         if (presetManager) {
@@ -167,86 +136,22 @@
             ?? presetManager?.readPresetExtensionField?.({ path: 'regex_scripts' });
           if (Array.isArray(presetScripts)) return presetScripts;
         }
-        // ST 1.17 fallback
+
         const presets = ctx?.extensionSettings?.regex_presets;
         if (Array.isArray(presets)) {
-          const sel = presets.find(p => p.isSelected) || presets[0];
-          if (sel) {
-            if (Array.isArray(sel.regex_scripts)) return sel.regex_scripts;
-            if (Array.isArray(sel.scripts)) return sel.scripts;
-            if (Array.isArray(sel.regex)) return sel.regex;
-          }
+          const selectedPreset = presets.find((preset) => preset?.isSelected) || presets[0];
+          if (Array.isArray(selectedPreset?.regex_scripts)) return selectedPreset.regex_scripts;
         }
+
         return [];
       }
+
       return [];
-    }
-
-    function getScriptsByItemId(currentScripts = getScriptsByCurrentScope(), items = []) {
-      const map = new Map();
-      if (!Array.isArray(currentScripts)) return map;
-      currentScripts.forEach((script, index) => {
-        if (!script || typeof script !== 'object') return;
-        const scriptId = normalizeName(script.id);
-        if (scriptId) {
-          // 有 ID：标准路径
-          map.set(`dom:${scriptId}`, script);
-        } else if (items[index]?.id) {
-          // 无 ID：按 DOM 下标对齐
-          map.set(items[index].id, script);
-        }
-      });
-      return map;
-    }
-
-    function getScriptIdFromItemId(itemId) {
-      const normalizedItemId = normalizeName(itemId);
-      if (!normalizedItemId.startsWith('dom:')) return '';
-      return normalizeName(normalizedItemId.slice(4));
-    }
-
-    function getFolderScriptIds(groupId, currentScripts = getScriptsByCurrentScope()) {
-      const validGroupIds = new Set(store.groups.map((group) => group.id));
-      const currentScriptIds = new Set(
-        currentScripts
-          .map((script) => normalizeName(script?.id))
-          .filter(Boolean)
-      );
-      const assignedGroupIdsByScriptId = new Map();
-
-      for (const [itemId, assignedGroupId] of Object.entries(store.assignments || {})) {
-        const scriptId = getScriptIdFromItemId(itemId);
-        if (!scriptId || !currentScriptIds.has(scriptId)) continue;
-
-        const normalizedGroupId = assignedGroupId ? String(assignedGroupId) : null;
-        if (normalizedGroupId && !validGroupIds.has(normalizedGroupId)) continue;
-        if (!assignedGroupIdsByScriptId.has(scriptId)) {
-          assignedGroupIdsByScriptId.set(scriptId, normalizedGroupId);
-        }
-      }
-
-      const targetGroupId = groupId === UNGROUPED_ID ? null : String(groupId);
-      const folderScriptIds = new Set();
-      for (const scriptId of currentScriptIds) {
-        const assignedGroupId = assignedGroupIdsByScriptId.get(scriptId) ?? null;
-        const belongsToGroup = targetGroupId === null ? assignedGroupId === null : assignedGroupId === targetGroupId;
-        if (belongsToGroup) folderScriptIds.add(scriptId);
-      }
-
-      return folderScriptIds;
-    }
-
-    function generateUniqueScriptId(existingIds) {
-      let nextId = '';
-      do {
-        nextId = uid('regex');
-      } while (existingIds.has(nextId));
-      existingIds.add(nextId);
-      return nextId;
     }
 
     async function saveScriptsForCurrentScope(nextScripts, ctx = getCtx()) {
       const scriptType = getScriptType();
+
       if (scriptType === 0) {
         if (ctx?.extensionSettings) ctx.extensionSettings.regex = nextScripts;
         ctx?.saveSettingsDebounced?.();
@@ -255,16 +160,19 @@
 
       if (scriptType === 1) {
         const characterId = ctx?.characterId;
-        if (characterId === undefined || characterId === null) return;
+        if (characterId === undefined || characterId === null) {
+          toast('请先在 ST 中选中一个角色', 'warning');
+          return;
+        }
+
         if (typeof ctx?.writeExtensionField === 'function') {
           await ctx.writeExtensionField(characterId, 'regex_scripts', nextScripts);
         } else if (ctx?.characters?.[characterId]) {
-          // ST 1.17 fallback
           const charData = ctx.characters[characterId];
           if (!charData.data) charData.data = {};
           if (!charData.data.extensions) charData.data.extensions = {};
           charData.data.extensions.regex_scripts = nextScripts;
-          if (typeof window.saveSettingsDebounced === 'function') window.saveSettingsDebounced();
+          ctx?.saveSettingsDebounced?.();
         }
         return;
       }
@@ -275,24 +183,20 @@
           const presetName = presetManager?.getSelectedPresetName?.();
           if (presetName) {
             await presetManager.writePresetExtensionField({ name: presetName, path: 'regex_scripts', value: nextScripts });
-            await new Promise((resolve) => window.setTimeout(resolve, 100));
             return;
           }
         }
-        // ST 1.17 fallback
+
         const presets = ctx?.extensionSettings?.regex_presets;
-        if (Array.isArray(presets)) {
-          const sel = presets.find(p => p.isSelected) || presets[0];
-          if (sel) {
-            // Update the array that originally existed
-            if (Array.isArray(sel.regex_scripts)) sel.regex_scripts = nextScripts;
-            else if (Array.isArray(sel.scripts)) sel.scripts = nextScripts;
-            else if (Array.isArray(sel.regex)) sel.regex = nextScripts;
-            else sel.scripts = nextScripts; // Default fallback to match legacy
-            
-            ctx?.saveSettingsDebounced?.();
-            await new Promise((resolve) => window.setTimeout(resolve, 100));
-          }
+        if (!Array.isArray(presets) || presets.length < 1) {
+          toast('当前没有可用的预设，无法保存预设正则', 'warning');
+          return;
+        }
+
+        const selectedPreset = presets.find((preset) => preset?.isSelected) || presets[0];
+        if (selectedPreset) {
+          selectedPreset.regex_scripts = nextScripts;
+          ctx?.saveSettingsDebounced?.();
         }
       }
     }
@@ -300,260 +204,152 @@
     async function reloadRegexUi(ctx = getCtx()) {
       if (typeof window.loadRegexScripts === 'function') {
         await window.loadRegexScripts();
-      } else {
-        await new Promise((resolve) => window.setTimeout(resolve, 80));
       }
+
       const currentChatId = ctx?.getCurrentChatId?.();
       if (currentChatId) {
         await ctx?.reloadCurrentChat?.();
       }
+
       await new Promise((resolve) => schedule(resolve));
     }
 
-    function refreshAllPanels() {
-      const controllers = window.STRegexManualGroups?.bootstrap?._controllers;
-      if (!Array.isArray(controllers) || controllers.length < 1) return;
+    function collectItems(listEl = getListEl()) {
+      return getDirectScriptItems(listEl).map((itemEl) => ({
+        el: itemEl,
+        id: getItemId(itemEl),
+        keyCandidate: normalizeName(getItemKeyCandidate(itemEl)),
+        name: getScriptName(itemEl),
+      }));
+    }
 
-      schedule(() => {
-        for (const controller of controllers) {
-          try {
-            controller?.tryEnsure?.();
-          } catch {
-            // ignore individual controller refresh failures
-          }
-        }
+    function ensureScriptIds(currentScripts) {
+      let changed = false;
+      const nextScripts = currentScripts.map((script) => {
+        if (!script || typeof script !== 'object') return script;
+        if (normalizeName(script.id)) return script;
+        changed = true;
+        return { ...script, id: uid('regex') };
       });
+      return { changed, nextScripts };
     }
 
-    function removeScriptsFromCurrentList(scriptIds = []) {
-      const targetScriptIds = new Set(scriptIds.map((scriptId) => normalizeName(scriptId)).filter(Boolean));
-      if (targetScriptIds.size < 1) return;
+    async function ensureScriptsReady(ctx = getCtx()) {
+      const currentScripts = getScriptsByCurrentScope(ctx);
+      if (!Array.isArray(currentScripts)) return [];
 
-      for (const itemEl of getDirectScriptItems(getListEl())) {
-        const itemScriptId = normalizeName(getItemKeyCandidate(itemEl));
-        if (!itemScriptId || !targetScriptIds.has(itemScriptId)) continue;
-        itemEl.remove();
+      const { changed, nextScripts } = ensureScriptIds(currentScripts);
+      if (changed) {
+        await saveScriptsForCurrentScope(nextScripts, ctx);
+        await reloadRegexUi(ctx);
+        return getScriptsByCurrentScope(ctx);
       }
+
+      return currentScripts;
     }
 
-    function getFolderItemIds(groupId, items = collectItems(), currentScripts = getScriptsByCurrentScope()) {
-      const folderScriptIds = getFolderScriptIds(groupId, currentScripts);
-      const itemIds = new Set();
-      const validGroupIds = new Set(store.groups.map(g => g.id));
+    function getScriptByItem(item, currentScripts) {
+      const scriptId = normalizeName(item?.keyCandidate) || (normalizeName(item?.id).startsWith('dom:') ? normalizeName(item.id).slice(4) : '');
+      if (!scriptId) return null;
+      return currentScripts.find((script) => normalizeName(script?.id) === scriptId) || null;
+    }
+
+    function pruneStore(items = collectItems(), currentScripts = getScriptsByCurrentScope()) {
+      const normalizedGroups = getSortedGroups(store.groups).map((group, index) => ({
+        ...group,
+        order: index + 1,
+      }));
+      const validGroupIds = new Set(normalizedGroups.map((group) => group.id));
+      const validScriptIds = new Set(currentScripts.map((script) => normalizeName(script?.id)).filter(Boolean));
+      const nextAssignments = {};
 
       for (const item of items) {
-        const assignedGroupId = store.assignments[item.id];
-        const actualGroupId = (assignedGroupId && validGroupIds.has(assignedGroupId)) ? assignedGroupId : UNGROUPED_ID;
-        if (actualGroupId === groupId) {
-          itemIds.add(item.id);
+        const script = getScriptByItem(item, currentScripts);
+        const scriptId = normalizeName(script?.id);
+        if (!scriptId) continue;
+        const assignedGroupId = store.assignments[`dom:${scriptId}`] || store.assignments[item.id];
+        if (assignedGroupId && validGroupIds.has(assignedGroupId)) {
+          nextAssignments[`dom:${scriptId}`] = assignedGroupId;
         }
       }
 
-      for (const scriptId of folderScriptIds) {
-        itemIds.add(`dom:${scriptId}`);
-      }
+      store.assignments = nextAssignments;
+      store.collapsed = Object.fromEntries(
+        Object.entries(store.collapsed || {}).filter(([groupId]) => groupId === UNGROUPED_ID || validGroupIds.has(groupId)),
+      );
+      store.disabledFolders = Object.fromEntries(
+        Object.entries(store.disabledFolders || {}).filter(([groupId]) => groupId === UNGROUPED_ID || validGroupIds.has(groupId)),
+      );
+      store.groups = normalizedGroups;
 
-      return Array.from(itemIds);
+      for (const scriptId of Object.keys(store.assignments)) {
+        if (!scriptId.startsWith('dom:')) delete store.assignments[scriptId];
+        const pureScriptId = scriptId.slice(4);
+        if (!validScriptIds.has(pureScriptId)) delete store.assignments[scriptId];
+      }
     }
 
-    async function applyFolderDisabledState(groupId, enabled, items = collectItems()) {
-      const ctx = getCtx();
-      const currentScripts = getScriptsByCurrentScope(ctx);
-      if (!Array.isArray(currentScripts)) return false;
+    function getAssignedGroupIdForScriptId(scriptId) {
+      return store.assignments[`dom:${scriptId}`] || null;
+    }
 
-      const targetItemIds = getFolderItemIds(groupId, items, currentScripts);
-      if (targetItemIds.length < 1) {
-        toast(`目前生效 0 条 (共 0 条)`, 'success', `本次${enabled ? '开启' : '关闭'} 0 条`);
-        if (store.disabledSnapshots?.[groupId]) {
-          delete store.disabledSnapshots[groupId];
-          return true;
-        }
-        return false;
+    function setAssignedGroupIdForScriptId(scriptId, groupId) {
+      const itemId = `dom:${scriptId}`;
+      if (!groupId || groupId === UNGROUPED_ID) delete store.assignments[itemId];
+      else store.assignments[itemId] = groupId;
+    }
+
+    function getFolderState(groupId) {
+      return store.disabledFolders?.[groupId] ? STATE_DISABLED : STATE_ENABLED;
+    }
+
+    function applyFolderStateToItem(item, groupId) {
+      const isDisabled = !!store.disabledFolders?.[groupId];
+      item.el.classList.toggle('st-rmg-folder-item-disabled', isDisabled);
+      item.el.classList.toggle('st-rmg-folder-item-locked', isDisabled);
+
+      const disableCheckbox = item.el.querySelector?.('.disable_regex');
+      if (disableCheckbox instanceof HTMLInputElement) {
+        disableCheckbox.disabled = isDisabled;
+        disableCheckbox.title = isDisabled ? `当前${FOLDER_LABEL}已关闭，无法单独切换` : '';
       }
-
-      const availableScriptsByItemId = getScriptsByItemId(currentScripts, items);
-      const availableTargetItemIds = new Set(targetItemIds.filter((itemId) => availableScriptsByItemId.has(itemId)));
-
-      // === DOM-based fallback：脚本数据不可读时（如预设正则），直接操作 checkbox ===
-      if (availableTargetItemIds.size < 1) {
-        if (!store.disabledSnapshots || typeof store.disabledSnapshots !== 'object') {
-          store.disabledSnapshots = {};
-        }
-
-        const existingSnapshot = store.disabledSnapshots[groupId] && typeof store.disabledSnapshots[groupId] === 'object'
-          ? { ...store.disabledSnapshots[groupId] } : {};
-        const nextSnapshot = {};
-        let changedCount = 0;
-        let snapshotChanged = false;
-
-        // 第一步：遍历当前 DOM 状态，收集 checkbox 并操作
-        for (const itemId of targetItemIds) {
-          const item = items.find(i => i.id === itemId);
-          if (!item?.el) continue;
-          const checkbox = item.el.querySelector('input[type=checkbox]');
-          if (!checkbox) continue;
-          const currentlyActive = checkbox.checked;
-
-          if (!enabled) {
-            // 关闭文件夹：保存当前状态快照，然后禁用（uncheck）
-            if (!Object.prototype.hasOwnProperty.call(existingSnapshot, itemId)) {
-              nextSnapshot[itemId] = currentlyActive;
-              snapshotChanged = true;
-            } else {
-              nextSnapshot[itemId] = existingSnapshot[itemId];
-            }
-            if (currentlyActive) {
-              checkbox.click();
-              changedCount++;
-            }
-          } else {
-            // 开启文件夹：从快照恢复状态
-            if (!Object.prototype.hasOwnProperty.call(existingSnapshot, itemId)) continue;
-            const shouldBeActive = !!existingSnapshot[itemId];
-            snapshotChanged = true;
-            if (!currentlyActive && shouldBeActive) {
-              checkbox.click();
-              changedCount++;
-            }
-          }
-        }
-
-        // 保存快照
-        const hadSnapshot = Object.prototype.hasOwnProperty.call(store.disabledSnapshots, groupId);
-        if (!enabled && Object.keys(nextSnapshot).length > 0) {
-          store.disabledSnapshots[groupId] = nextSnapshot;
-        } else if (hadSnapshot) {
-          delete store.disabledSnapshots[groupId];
-          snapshotChanged = true;
-        }
-        if (snapshotChanged) saveStore();
-
-        // 等待 ST 事件处理器和渲染完成
-        if (changedCount > 0) {
-          await new Promise((resolve) => window.setTimeout(resolve, 200));
-        }
-
-        // 直接通过新鲜 DOM 状态读出当前激活条数，确保存统数据绝对准确
-        const freshItems = collectItems();
-        let activeCount = 0;
-        for (const itemId of targetItemIds) {
-          const freshItem = freshItems.find(i => i.id === itemId) || items.find(i => i.id === itemId);
-          if (freshItem?.el) {
-            const cb = freshItem.el.querySelector('input[type=checkbox]');
-            if (cb && cb.checked) {
-              activeCount++;
-            }
-          }
-        }
-
-        toast(`目前生效 ${activeCount} 条 (共 ${targetItemIds.length} 条)`, 'success', `本次${enabled ? '开启' : '关闭'} ${changedCount} 条`);
-        if (changedCount > 0) {
-          refreshAllPanels();
-          schedule(() => renderTree().catch(() => {}));
-        }
-        return snapshotChanged || changedCount > 0;
-      }
-
-      // === 标准 API 路径（全局/局部正则，脚本数据可读）===
-      const existingSnapshotSource = store.disabledSnapshots?.[groupId];
-      const existingSnapshot = existingSnapshotSource && typeof existingSnapshotSource === 'object' ? { ...existingSnapshotSource } : {};
-      const nextSnapshot = {};
-
-      let snapshotChanged = false;
-      for (const [itemId, value] of Object.entries(existingSnapshot)) {
-        if (availableTargetItemIds.has(itemId)) nextSnapshot[itemId] = !!value;
-        else snapshotChanged = true;
-      }
-
-      let scriptsChanged = false;
-      let changedCount = 0;
-      const nextScripts = currentScripts.map((script) => {
-        const scriptId = normalizeName(script?.id);
-        if (!scriptId) return script;
-
-        const itemId = `dom:${scriptId}`;
-        if (!availableTargetItemIds.has(itemId)) return script;
-
-        if (!enabled) {
-          if (!Object.prototype.hasOwnProperty.call(nextSnapshot, itemId)) {
-            nextSnapshot[itemId] = !!script.disabled;
-            snapshotChanged = true;
-          }
-          if (!script.disabled) {
-            scriptsChanged = true;
-            changedCount++;
-            return { ...script, disabled: true };
-          }
-          return script;
-        }
-
-        if (!Object.prototype.hasOwnProperty.call(nextSnapshot, itemId)) return script;
-
-        const nextDisabled = !!nextSnapshot[itemId];
-        delete nextSnapshot[itemId];
-        snapshotChanged = true;
-        if (!!script.disabled === nextDisabled) return script;
-        scriptsChanged = true;
-        changedCount++;
-        return { ...script, disabled: nextDisabled };
-      });
-
-      const hadSnapshot = Object.prototype.hasOwnProperty.call(store.disabledSnapshots || {}, groupId);
-      if (Object.keys(nextSnapshot).length > 0) {
-        store.disabledSnapshots[groupId] = nextSnapshot;
-      } else if (hadSnapshot) {
-        delete store.disabledSnapshots[groupId];
-        snapshotChanged = true;
-      }
-
-      const totalCount = availableTargetItemIds.size;
-      const activeCount = (scriptsChanged ? nextScripts : currentScripts)
-        .filter((script) => {
-          const sid = normalizeName(script?.id);
-          return sid && availableTargetItemIds.has(`dom:${sid}`) && !script.disabled;
-        }).length;
-
-      const toastMessage = `目前生效 ${activeCount} 条 (共 ${totalCount} 条)`;
-      const toastTitle = `本次${enabled ? '开启' : '关闭'} ${changedCount} 条`;
-
-      if (!scriptsChanged) {
-        toast(toastMessage, 'success', toastTitle);
-        return snapshotChanged;
-      }
-
-      await saveScriptsForCurrentScope(nextScripts, ctx);
-      await reloadRegexUi(ctx);
-      refreshAllPanels();
-      toast(toastMessage, 'success', toastTitle);
-      return true;
     }
 
     async function setFolderEnabled(groupId, enabled) {
-      const items = collectItems();
-      
-      pendingViewportRestore = captureViewportState(getHeaderEl());
+      const ctx = getCtx();
+      const currentScripts = await ensureScriptsReady(ctx);
+      if (!Array.isArray(currentScripts)) return;
 
-      if (!store.disabledFolders || typeof store.disabledFolders !== 'object') {
-        store.disabledFolders = {};
-      }
-      if (!store.disabledSnapshots || typeof store.disabledSnapshots !== 'object') {
-        store.disabledSnapshots = {};
-      }
+      const targetScriptIds = new Set(
+        currentScripts
+          .map((script) => normalizeName(script?.id))
+          .filter(Boolean)
+          .filter((scriptId) => {
+            const assignedGroupId = getAssignedGroupIdForScriptId(scriptId) || UNGROUPED_ID;
+            return assignedGroupId === groupId;
+          }),
+      );
 
-      if (!enabled) {
-        store.disabledFolders[groupId] = true;
-      } else {
-        delete store.disabledFolders[groupId];
-      }
-
-      await applyFolderDisabledState(groupId, enabled, items);
+      if (enabled) delete store.disabledFolders[groupId];
+      else store.disabledFolders[groupId] = true;
       saveStore();
-      await renderTree();
-    }
 
-    function findGroupByNormalizedName(name, excludeGroupId = '') {
-      const normalized = normalizeName(name);
-      return store.groups.find((group) => group.id !== excludeGroupId && normalizeName(group.name) === normalized);
+      let changedCount = 0;
+      const nextScripts = currentScripts.map((script) => {
+        const scriptId = normalizeName(script?.id);
+        if (!scriptId || !targetScriptIds.has(scriptId)) return script;
+        const nextDisabled = !enabled;
+        if (!!script.disabled === nextDisabled) return script;
+        changedCount += 1;
+        return { ...script, disabled: nextDisabled };
+      });
+
+      if (changedCount > 0) {
+        await saveScriptsForCurrentScope(nextScripts, ctx);
+        await reloadRegexUi(ctx);
+      }
+
+      await renderTree();
     }
 
     function validateGroupName(name, excludeGroupId = '') {
@@ -568,7 +364,7 @@
         return '';
       }
 
-      const duplicate = findGroupByNormalizedName(normalized, excludeGroupId);
+      const duplicate = store.groups.find((group) => group.id !== excludeGroupId && normalizeName(group.name) === normalized);
       if (duplicate) {
         toast(`已存在同名${FOLDER_LABEL}`, 'warning');
         return '';
@@ -577,123 +373,127 @@
       return normalized;
     }
 
-    function getImportBaseGroupName(name) {
-      const normalized = normalizeName(name);
-      if (!normalized || normalized === UNGROUPED_LABEL) return `导入${FOLDER_LABEL}`;
-      return normalized;
+    async function addGroup() {
+      const result = await openPrompt(`输入${FOLDER_LABEL}名称，例如 A文件夹 / B文件夹`);
+      if (result === null) return;
+      const name = validateGroupName(result);
+      if (!name) return;
+
+      store.groups.push({
+        id: uid('group'),
+        name,
+        order: store.groups.length + 1,
+      });
+      saveStore();
+      renderTree();
     }
 
-    function getUniqueGroupName(name) {
-      const baseName = getImportBaseGroupName(name);
-      if (!findGroupByNormalizedName(baseName)) return baseName;
+    async function renameGroup(groupId) {
+      const group = getGroupById(groupId);
+      if (!group) return;
 
-      let index = 1;
-      while (true) {
-        const candidate = index === 1 ? `${baseName}（导入）` : `${baseName}（导入${index}）`;
-        if (!findGroupByNormalizedName(candidate)) return candidate;
-        index += 1;
+      const result = await openPrompt(`输入新的${FOLDER_LABEL}名称`, group.name);
+      if (result === null) return;
+      const nextName = validateGroupName(result, group.id);
+      if (!nextName) return;
+
+      group.name = nextName;
+      saveStore();
+      renderTree();
+    }
+
+    async function deleteGroup(groupId) {
+      const group = getGroupById(groupId);
+      if (!group) return;
+
+      const ok = await openConfirm(`删除${FOLDER_LABEL}“${group.name}”后，其中正则会回到${UNGROUPED_LABEL}，是否继续？`);
+      if (!ok) return;
+
+      store.groups = store.groups.filter((entry) => entry.id !== groupId);
+      delete store.collapsed[groupId];
+      delete store.disabledFolders[groupId];
+
+      for (const [scriptId, assignedGroupId] of Object.entries(store.assignments)) {
+        if (assignedGroupId === groupId) delete store.assignments[scriptId];
       }
+
+      saveStore();
+      await renderTree();
+    }
+
+    async function deleteGroupAndScripts(groupId) {
+      const group = getGroupById(groupId);
+      if (!group || groupId === UNGROUPED_ID) return;
+
+      const ctx = getCtx();
+      const currentScripts = await ensureScriptsReady(ctx);
+      const targetScriptIds = new Set(
+        currentScripts
+          .map((script) => normalizeName(script?.id))
+          .filter(Boolean)
+          .filter((scriptId) => getAssignedGroupIdForScriptId(scriptId) === groupId),
+      );
+
+      const ok = await openConfirm(`删除${FOLDER_LABEL}“${group.name}”以及其中 ${targetScriptIds.size} 条正则后将无法恢复，是否继续？`);
+      if (!ok) return;
+
+      const nextScripts = currentScripts.filter((script) => !targetScriptIds.has(normalizeName(script?.id)));
+      await saveScriptsForCurrentScope(nextScripts, ctx);
+
+      store.groups = store.groups.filter((entry) => entry.id !== groupId);
+      delete store.collapsed[groupId];
+      delete store.disabledFolders[groupId];
+      for (const scriptId of Array.from(targetScriptIds)) {
+        delete store.assignments[`dom:${scriptId}`];
+      }
+
+      saveStore();
+      await reloadRegexUi(ctx);
+      await renderTree();
     }
 
     function buildExportFileName(groupName) {
       return `${keySegment(groupName, 'regex-folder')}${EXPORT_FILE_EXTENSION}`;
     }
 
-    function ensurePresetImportTarget(ctx = getCtx()) {
-      if (getScriptType() !== 2) return false;
+    async function exportGroup(groupId) {
+      const group = getGroupById(groupId);
+      if (!group) return;
 
-      const presetManager = getRegexPresetManager(ctx);
-      const presetName = presetManager?.getSelectedPresetName?.();
-      if (presetName) return false;
+      const currentScripts = getScriptsByCurrentScope();
+      const scripts = currentScripts
+        .filter((script) => getAssignedGroupIdForScriptId(normalizeName(script?.id)) === groupId)
+        .map((script) => cloneJsonData(script, null))
+        .filter(Boolean);
 
-      if (!ctx?.extensionSettings || typeof ctx.extensionSettings !== 'object') return false;
-
-      const presets = Array.isArray(ctx.extensionSettings.regex_presets) ? ctx.extensionSettings.regex_presets : [];
-      if (presets.length < 1) {
-        ctx.extensionSettings.regex_presets = [{ name: 'Default', isSelected: true, regex_scripts: [] }];
-        return true;
+      if (scripts.length < 1) {
+        toast(`当前${FOLDER_LABEL}内没有可导出的正则`, 'warning');
+        return;
       }
 
-      let selectedFound = false;
-      for (const preset of presets) {
-        if (preset?.isSelected) {
-          selectedFound = true;
-          break;
-        }
-      }
-      if (selectedFound) return false;
-
-      for (let index = 0; index < presets.length; index += 1) {
-        if (!presets[index] || typeof presets[index] !== 'object') continue;
-        presets[index].isSelected = index === 0;
-      }
-      return true;
-    }
-
-    function getImportedScriptMatchLabels(script) {
-      return Array.from(new Set(
-        [
-          script?.scriptName,
-          script?.script_name,
-          script?.name,
-          script?.label,
-          script?.title,
-          script?.findRegex,
-          script?.find_regex
-        ]
-          .map((value) => normalizeName(value))
-          .filter(Boolean)
-      )).slice(0, 6);
-    }
-
-    function captureImportBaseline(items = collectItems()) {
-      const nameCounts = {};
-      const itemIds = [];
-      const keyCandidates = [];
-
-      for (const item of items) {
-        itemIds.push(item.id);
-        if (item.keyCandidate) keyCandidates.push(item.keyCandidate);
-
-        const itemName = normalizeName(item.name);
-        if (itemName) {
-          nameCounts[itemName] = (nameCounts[itemName] || 0) + 1;
-        }
-      }
-
-      return {
-        itemIds,
-        keyCandidates,
-        nameCounts,
-        itemCount: items.length
+      const payload = {
+        type: EXPORT_BUNDLE_TYPE,
+        version: EXPORT_BUNDLE_VERSION,
+        source: {
+          module: MODULE_NAME,
+          scope,
+          title: titleText,
+          exportedAt: new Date().toISOString(),
+        },
+        group: {
+          name: group.name,
+          disabled: !!store.disabledFolders?.[groupId],
+          collapsed: !!store.collapsed?.[groupId],
+        },
+        scripts,
       };
-    }
 
-    function getItemNameOccurrences(items) {
-      const counts = new Map();
-      const occurrences = new Map();
-
-      for (const item of items) {
-        const itemName = normalizeName(item.name);
-        if (!itemName) continue;
-
-        const nextCount = (counts.get(itemName) || 0) + 1;
-        counts.set(itemName, nextCount);
-        occurrences.set(item.id, nextCount);
+      try {
+        const exported = await downloadTextFile(buildExportFileName(group.name), JSON.stringify(payload, null, 2));
+        if (exported) toast(`已导出${FOLDER_LABEL}“${group.name}”`, 'success');
+      } catch (error) {
+        toast(error?.message || '导出失败', 'error');
       }
-
-      return occurrences;
-    }
-
-    function isLikelyImportedItem(item, baseline, baselineItemIds, baselineKeyCandidates, nameOccurrences) {
-      if (!baseline) return true;
-      if (!baselineItemIds.has(item.id)) return true;
-      if (item.keyCandidate && !baselineKeyCandidates.has(item.keyCandidate)) return true;
-
-      const itemName = normalizeName(item.name);
-      const currentOccurrence = nameOccurrences.get(item.id) || 0;
-      const previousCount = Number(baseline.nameCounts?.[itemName] || 0);
-      return !!itemName && currentOccurrence > previousCount;
     }
 
     function parseImportBundle(rawText) {
@@ -708,278 +508,22 @@
         throw new Error('导入文件不是本插件导出的文件夹包');
       }
 
-      const version = Number(parsed.version);
-      if (!Number.isFinite(version) || version < 1 || version > EXPORT_BUNDLE_VERSION) {
-        throw new Error(`不支持的文件夹包版本：${parsed.version}`);
-      }
-
       const group = parsed.group && typeof parsed.group === 'object' ? parsed.group : null;
-      if (!group) {
-        throw new Error('导入文件缺少文件夹信息');
-      }
+      if (!group) throw new Error('导入文件缺少文件夹信息');
 
       const scripts = Array.isArray(parsed.scripts)
-        ? parsed.scripts
-          .map((script) => cloneJsonData(script, null))
-          .filter((script) => script && typeof script === 'object')
+        ? parsed.scripts.map((script) => cloneJsonData(script, null)).filter((script) => script && typeof script === 'object')
         : [];
-      if (scripts.length < 1) {
-        throw new Error('导入文件中没有可用的正则数据');
-      }
-
-      const snapshotSource = parsed.disabledSnapshotByScriptId && typeof parsed.disabledSnapshotByScriptId === 'object'
-        ? parsed.disabledSnapshotByScriptId
-        : {};
+      if (scripts.length < 1) throw new Error('导入文件中没有可用的正则数据');
 
       return {
-        version,
-        sourceScope: normalizeName(parsed?.source?.scope),
         group: {
-          name: getImportBaseGroupName(group.name),
+          name: normalizeName(group.name) || `导入${FOLDER_LABEL}`,
           disabled: !!group.disabled,
-          collapsed: !!group.collapsed
+          collapsed: !!group.collapsed,
         },
         scripts,
-        disabledSnapshotByScriptId: Object.fromEntries(
-          Object.entries(snapshotSource)
-            .filter(([scriptId]) => !!normalizeName(scriptId))
-            .map(([scriptId, value]) => [normalizeName(scriptId), !!value])
-        )
       };
-    }
-
-    async function exportGroup(groupId) {
-      const group = getGroupById(groupId);
-      if (!group) {
-        toast(`请选择要导出的${FOLDER_LABEL}`, 'warning');
-        return;
-      }
-
-      const currentScripts = getScriptsByCurrentScope();
-      const items = collectItems();
-      const itemIdsForGroup = new Set(
-        items
-          .filter((item) => store.assignments[item.id] === groupId)
-          .map((item) => item.id)
-      );
-
-      for (const [itemId, assignedGroupId] of Object.entries(store.assignments)) {
-        if (assignedGroupId === groupId) itemIdsForGroup.add(itemId);
-      }
-
-      const assignedScriptIds = new Set();
-      for (const item of items) {
-        if (!itemIdsForGroup.has(item.id)) continue;
-        const itemKey = normalizeName(item.keyCandidate);
-        if (itemKey) assignedScriptIds.add(itemKey);
-      }
-
-      for (const itemId of itemIdsForGroup) {
-        if (normalizeName(itemId).startsWith('dom:')) {
-          assignedScriptIds.add(normalizeName(itemId).slice(4));
-        }
-      }
-
-      const exportedScripts = currentScripts
-        .filter((script) => {
-          const scriptId = normalizeName(script?.id);
-          return !!scriptId && assignedScriptIds.has(scriptId);
-        })
-        .map((script) => cloneJsonData(script, null))
-        .filter((script) => script && typeof script === 'object');
-
-      if (exportedScripts.length < 1) {
-        toast(`当前${FOLDER_LABEL}内没有可导出的正则`, 'warning');
-        return;
-      }
-
-      const snapshotByScriptId = {};
-      const snapshotSource = store.disabledSnapshots?.[groupId] && typeof store.disabledSnapshots[groupId] === 'object'
-        ? store.disabledSnapshots[groupId]
-        : {};
-
-      for (const clonedScript of exportedScripts) {
-        const scriptId = normalizeName(clonedScript.id);
-        if (!scriptId) continue;
-        const snapshotKey = `dom:${scriptId}`;
-        if (Object.prototype.hasOwnProperty.call(snapshotSource, snapshotKey)) {
-          snapshotByScriptId[scriptId] = !!snapshotSource[snapshotKey];
-        }
-      }
-
-      const payload = {
-        type: EXPORT_BUNDLE_TYPE,
-        version: EXPORT_BUNDLE_VERSION,
-        source: {
-          module: MODULE_NAME,
-          scope,
-          title: titleText,
-          exportedAt: new Date().toISOString()
-        },
-        group: {
-          name: group.name,
-          disabled: !!store.disabledFolders?.[groupId],
-          collapsed: !!store.collapsed?.[groupId]
-        },
-        scripts: exportedScripts,
-        disabledSnapshotByScriptId: snapshotByScriptId
-      };
-
-      try {
-        const exported = await downloadTextFile(buildExportFileName(group.name), JSON.stringify(payload, null, 2));
-        if (exported) {
-          toast(`已导出${FOLDER_LABEL}“${group.name}”`, 'success');
-        }
-      } catch (error) {
-        toast(error?.message || '导出失败', 'error');
-      }
-    }
-
-    function insertGroupAfterAnchor(nextGroup, anchorGroupId = '') {
-      const orderedGroups = getGroups().map((group) => ({ ...group }));
-      const anchorIndex = orderedGroups.findIndex((group) => group.id === anchorGroupId);
-      const insertIndex = anchorIndex >= 0 ? anchorIndex + 1 : orderedGroups.length;
-      orderedGroups.splice(insertIndex, 0, nextGroup);
-      store.groups = orderedGroups.map((group, index) => ({ ...group, order: index + 1 }));
-    }
-
-    function queueImportedAssignments(importedEntries, groupId, baseline = captureImportBaseline()) {
-      if (!Array.isArray(importedEntries) || importedEntries.length < 1) {
-        pendingImportedAssignments = [];
-        pendingImportedBaseline = null;
-        return;
-      }
-
-      pendingImportedBaseline = baseline && typeof baseline === 'object'
-        ? {
-            itemIds: Array.isArray(baseline.itemIds) ? baseline.itemIds.slice() : [],
-            keyCandidates: Array.isArray(baseline.keyCandidates) ? baseline.keyCandidates.slice() : [],
-            nameCounts: baseline.nameCounts && typeof baseline.nameCounts === 'object' ? { ...baseline.nameCounts } : {},
-            itemCount: Number.isFinite(Number(baseline.itemCount)) ? Number(baseline.itemCount) : 0
-          }
-        : null;
-
-      pendingImportedAssignments = importedEntries.map((entry, importIndex) => ({
-        groupId,
-        scriptId: normalizeName(entry?.script?.id),
-        originalId: normalizeName(entry?.originalId),
-        matchLabels: Array.isArray(entry?.matchLabels) ? entry.matchLabels.slice(0, 6) : [],
-        importIndex,
-        preferredItemIndex: (pendingImportedBaseline?.itemCount || 0) + importIndex,
-        tempAssignmentKey: `dom:${entry?.script?.id || ''}`
-      })).filter((entry) => entry.scriptId || entry.originalId || entry.matchLabels.length > 0);
-    }
-
-    function queuePostImportRenderRetries(attempt = 1, maxAttempts = 4) {
-      if (attempt > maxAttempts) return;
-
-      const delayMs = attempt * 120;
-      window.setTimeout(() => {
-        schedule(() => {
-          if (!Array.isArray(pendingImportedAssignments) || pendingImportedAssignments.length < 1) return;
-
-          Promise.resolve(renderTree())
-            .catch(() => { })
-            .finally(() => {
-              if (pendingImportedAssignments.length > 0) {
-                queuePostImportRenderRetries(attempt + 1, maxAttempts);
-              }
-            });
-        });
-      }, delayMs);
-    }
-
-    function alignImportedAssignments(items = collectItems()) {
-      if (!Array.isArray(pendingImportedAssignments) || pendingImportedAssignments.length < 1) {
-        pendingImportedBaseline = null;
-        return false;
-      }
-
-      const baseline = pendingImportedBaseline && typeof pendingImportedBaseline === 'object' ? pendingImportedBaseline : null;
-      const baselineItemIds = new Set(Array.isArray(baseline?.itemIds) ? baseline.itemIds : []);
-      const baselineKeyCandidates = new Set(Array.isArray(baseline?.keyCandidates) ? baseline.keyCandidates : []);
-      const nameOccurrences = getItemNameOccurrences(items);
-      const baselineItemCount = Number.isFinite(Number(baseline?.itemCount)) ? Number(baseline.itemCount) : 0;
-      const pendingEntries = pendingImportedAssignments.map((entry) => ({
-        ...entry,
-        matchLabels: Array.isArray(entry.matchLabels) ? entry.matchLabels.slice() : []
-      }));
-      const remainingEntries = [];
-      let changed = false;
-      const usedItemIds = new Set();
-
-      function findImportedItemMatch(entry) {
-        const normalizedScriptId = normalizeName(entry.scriptId);
-        const normalizedOriginalId = normalizeName(entry.originalId);
-        const labelSet = new Set(
-          (Array.isArray(entry.matchLabels) ? entry.matchLabels : [])
-            .map((label) => normalizeName(label))
-            .filter(Boolean)
-        );
-
-        const exactMatch = items.find((item) => {
-          if (usedItemIds.has(item.id)) return false;
-          if (item.id === entry.tempAssignmentKey) return true;
-          if (item.keyCandidate && normalizedScriptId && item.keyCandidate === normalizedScriptId) return true;
-          if (item.keyCandidate && normalizedOriginalId && item.keyCandidate === normalizedOriginalId) return true;
-          return false;
-        });
-        if (exactMatch) return exactMatch;
-
-        const likelyNameMatch = items.find((item) => {
-          if (usedItemIds.has(item.id)) return false;
-
-          const itemName = normalizeName(item.name);
-          if (!itemName || !labelSet.has(itemName)) return false;
-
-          return isLikelyImportedItem(item, baseline, baselineItemIds, baselineKeyCandidates, nameOccurrences);
-        });
-        if (likelyNameMatch) return likelyNameMatch;
-
-        const orderedFallback = items.find((item) => {
-          if (usedItemIds.has(item.id)) return false;
-          if (item.index < Math.max(baselineItemCount, Number(entry.preferredItemIndex || 0))) return false;
-          return isLikelyImportedItem(item, baseline, baselineItemIds, baselineKeyCandidates, nameOccurrences);
-        });
-        if (orderedFallback) return orderedFallback;
-
-        return items.find((item) => {
-          if (usedItemIds.has(item.id)) return false;
-          return isLikelyImportedItem(item, baseline, baselineItemIds, baselineKeyCandidates, nameOccurrences);
-        }) || null;
-      }
-
-      for (const entry of pendingEntries) {
-        const matchedItem = findImportedItemMatch(entry);
-        if (!matchedItem) {
-          remainingEntries.push(entry);
-          continue;
-        }
-
-        const tempAssignmentKey = entry.tempAssignmentKey;
-        const groupId = entry.groupId;
-        usedItemIds.add(matchedItem.id);
-
-        if (store.assignments[tempAssignmentKey] !== undefined && tempAssignmentKey !== matchedItem.id) {
-          delete store.assignments[tempAssignmentKey];
-          changed = true;
-        }
-
-        if (store.assignments[matchedItem.id] !== groupId) {
-          store.assignments[matchedItem.id] = groupId;
-          changed = true;
-        }
-
-        if (store.disabledSnapshots?.[groupId] && Object.prototype.hasOwnProperty.call(store.disabledSnapshots[groupId], tempAssignmentKey)) {
-          store.disabledSnapshots[groupId][matchedItem.id] = store.disabledSnapshots[groupId][tempAssignmentKey];
-          delete store.disabledSnapshots[groupId][tempAssignmentKey];
-          changed = true;
-        }
-      }
-
-      pendingImportedAssignments = remainingEntries;
-      if (remainingEntries.length < 1) pendingImportedBaseline = null;
-      return changed;
     }
 
     async function importGroup(anchorGroupId = '') {
@@ -995,253 +539,64 @@
       }
 
       const ctx = getCtx();
-
-      if (getScriptType() === 2) {
-        const presetChanged = ensurePresetImportTarget(ctx);
-        if (presetChanged) {
-          ctx?.saveSettingsDebounced?.();
-          await new Promise((resolve) => window.setTimeout(resolve, 80));
-        }
-      }
-
-      let currentScripts = getScriptsByCurrentScope(ctx);
+      const currentScripts = await ensureScriptsReady(ctx);
       if (!Array.isArray(currentScripts)) {
         toast('当前范围的正则列表不可用，导入失败', 'error');
         return;
       }
 
-      // 局部正则：如果没有选中角色，导入会静默失败
       if (getScriptType() === 1 && (ctx?.characterId === undefined || ctx?.characterId === null)) {
         toast('请先在 ST 中选中一个角色，然后再向局部正则导入文件夹', 'warning');
         return;
       }
 
-      const importBaseline = captureImportBaseline();
-
-      let nextGroupId = uid('group');
-      while (getGroupById(nextGroupId)) {
-        nextGroupId = uid('group');
+      if (getScriptType() === 2) {
+        const presets = ctx?.extensionSettings?.regex_presets;
+        if (!Array.isArray(presets) || presets.length < 1) {
+          toast('当前没有可用的预设，无法导入文件夹', 'warning');
+          return;
+        }
       }
 
-      const nextGroupName = getUniqueGroupName(bundle.group.name);
-      const existingScriptIds = new Set(
-        currentScripts
-          .map((script) => normalizeName(script?.id))
-          .filter(Boolean)
-      );
+      const nextGroupId = uid('group');
+      const nextGroupName = validateGroupName(bundle.group.name) || `${bundle.group.name}（导入）`;
 
-      const importedEntries = [];
-      for (const rawScript of bundle.scripts) {
-        const clonedScript = cloneJsonData(rawScript, null);
-        if (!clonedScript || typeof clonedScript !== 'object') continue;
+      const existingScriptIds = new Set(currentScripts.map((script) => normalizeName(script?.id)).filter(Boolean));
+      const importedScripts = bundle.scripts.map((script) => {
+        const nextScript = { ...script };
+        let nextScriptId = normalizeName(nextScript.id);
+        while (!nextScriptId || existingScriptIds.has(nextScriptId)) {
+          nextScriptId = uid('regex');
+        }
+        existingScriptIds.add(nextScriptId);
+        nextScript.id = nextScriptId;
+        nextScript.disabled = !!bundle.group.disabled;
+        return nextScript;
+      });
 
-        const originalId = normalizeName(clonedScript.id);
-        const originalDisabled = !!clonedScript.disabled;
-        // Always generate a new script ID to prevent cross-scope DOM collisions 
-        // (e.g. Global vs Preset lists sharing standard numeric ID namespaces)
-        const nextScriptId = generateUniqueScriptId(existingScriptIds);
-
-        clonedScript.id = nextScriptId;
-        if (bundle.group.disabled) clonedScript.disabled = true;
-        importedEntries.push({
-          originalId,
-          originalDisabled,
-          matchLabels: getImportedScriptMatchLabels(clonedScript),
-          script: clonedScript
-        });
-      }
-
-      if (importedEntries.length < 1) {
-        toast('导入文件中没有可用的正则数据', 'error');
-        return;
-      }
-
-      if (!store.disabledFolders || typeof store.disabledFolders !== 'object') {
-        store.disabledFolders = {};
-      }
-      if (!store.disabledSnapshots || typeof store.disabledSnapshots !== 'object') {
-        store.disabledSnapshots = {};
-      }
-
-      insertGroupAfterAnchor({
+      store.groups.push({
         id: nextGroupId,
         name: nextGroupName,
-        order: store.groups.length + 1
-      }, anchorGroupId);
-
+        order: store.groups.length + 1,
+      });
       if (bundle.group.collapsed) store.collapsed[nextGroupId] = true;
-      else delete store.collapsed[nextGroupId];
-
-      if (bundle.group.disabled) {
-        store.disabledFolders[nextGroupId] = true;
-        const nextSnapshot = {};
-        for (const entry of importedEntries) {
-          nextSnapshot[`dom:${entry.script.id}`] = entry.originalId && Object.prototype.hasOwnProperty.call(bundle.disabledSnapshotByScriptId, entry.originalId)
-            ? !!bundle.disabledSnapshotByScriptId[entry.originalId]
-            : entry.originalDisabled;
-        }
-        store.disabledSnapshots[nextGroupId] = nextSnapshot;
-      } else {
-        delete store.disabledFolders[nextGroupId];
-        delete store.disabledSnapshots[nextGroupId];
+      if (bundle.group.disabled) store.disabledFolders[nextGroupId] = true;
+      for (const script of importedScripts) {
+        setAssignedGroupIdForScriptId(normalizeName(script.id), nextGroupId);
       }
 
-      for (const entry of importedEntries) {
-        store.assignments[`dom:${entry.script.id}`] = nextGroupId;
-      }
-
-      queueImportedAssignments(importedEntries, nextGroupId, importBaseline);
-      pendingViewportRestore = captureViewportState(getHeaderEl());
       saveStore();
-      await saveScriptsForCurrentScope(currentScripts.concat(importedEntries.map((entry) => entry.script)), ctx);
+      await saveScriptsForCurrentScope(currentScripts.concat(importedScripts), ctx);
       await reloadRegexUi(ctx);
-      refreshAllPanels();
       await renderTree();
-      queuePostImportRenderRetries();
-
-      const scopeHint = bundle.sourceScope ? `（来源：${bundle.sourceScope}）` : '';
-      toast(`已导入${FOLDER_LABEL}“${nextGroupName}”${scopeHint}`, 'success');
-    }
-
-    function collectItems(listEl = getListEl()) {
-      return getDirectScriptItems(listEl).map((itemEl, index) => ({
-        el: itemEl,
-        index,
-        keyCandidate: normalizeName(getItemKeyCandidate(itemEl)),
-        id: getItemId(itemEl),
-        legacyId: getLegacyItemId(itemEl, index),
-        name: getScriptName(itemEl)
-      }));
-    }
-
-    function migrateLegacyAssignments(items) {
-      const protectedPendingKeys = new Set((pendingImportedAssignments || []).map((entry) => entry.tempAssignmentKey).filter(Boolean));
-      let changed = false;
-
-      for (const item of items) {
-        if (protectedPendingKeys.has(item.id)) continue;
-        let legacyKey = '';
-        let legacyGroupId = undefined;
-
-        if (item.legacyId && item.legacyId !== item.id) {
-          legacyKey = item.legacyId;
-          legacyGroupId = store.assignments[legacyKey];
-        }
-
-        if (legacyGroupId === undefined && item.keyCandidate) {
-          const legacyPrefix = `${item.keyCandidate}#`;
-          const matchedLegacyKeys = Object.keys(store.assignments).filter((key) => key.startsWith(legacyPrefix));
-          if (matchedLegacyKeys.length === 1) {
-            legacyKey = matchedLegacyKeys[0];
-            legacyGroupId = store.assignments[legacyKey];
-          }
-        }
-
-        if (legacyGroupId === undefined) continue;
-
-        if (store.assignments[item.id] === undefined) {
-          store.assignments[item.id] = legacyGroupId;
-        }
-
-        if (legacyKey) delete store.assignments[legacyKey];
-        changed = true;
-      }
-
-      if (changed) saveStore();
-    }
-
-    function cleanupAssignments(items) {
-      const currentScripts = getScriptsByCurrentScope();
-      const validItemIds = new Set(items.map((item) => item.id));
-      const validGroupIds = new Set(store.groups.map((group) => group.id));
-      const shouldPruneMissingItems = scope === 'global' && items.length > 0;
-      const canPruneSnapshotItems = items.length > 0;
-      const protectedPendingKeys = new Set((pendingImportedAssignments || []).map((entry) => entry.tempAssignmentKey).filter(Boolean));
-      const pendingImportGroupIds = new Set((pendingImportedAssignments || []).map((entry) => entry.groupId).filter(Boolean));
-      const currentScriptsByItemId = getScriptsByItemId(currentScripts, items);
-      let changed = false;
-
-      for (const [itemId, groupId] of Object.entries(store.assignments)) {
-        const missingInCurrentView = !validItemIds.has(itemId);
-        const missingInCurrentScripts = !currentScriptsByItemId.has(itemId);
-        const invalidGroup = groupId && !validGroupIds.has(groupId);
-        if (protectedPendingKeys.has(itemId)) continue;
-        if ((shouldPruneMissingItems && missingInCurrentView && missingInCurrentScripts) || invalidGroup) {
-          delete store.assignments[itemId];
-          changed = true;
-        }
-      }
-
-      for (const groupId of Object.keys(store.collapsed)) {
-        if (groupId !== UNGROUPED_ID && !validGroupIds.has(groupId)) {
-          delete store.collapsed[groupId];
-          changed = true;
-        }
-      }
-
-      for (const groupId of Object.keys(store.disabledFolders || {})) {
-        if (groupId !== UNGROUPED_ID && !validGroupIds.has(groupId)) {
-          delete store.disabledFolders[groupId];
-          changed = true;
-          continue;
-        }
-
-        if (!pendingImportGroupIds.has(groupId) && getFolderItemIds(groupId, items, currentScripts).length < 1) {
-          delete store.disabledFolders[groupId];
-          changed = true;
-        }
-      }
-
-      for (const [groupId, snapshot] of Object.entries(store.disabledSnapshots || {})) {
-        if (groupId !== UNGROUPED_ID && !validGroupIds.has(groupId)) {
-          delete store.disabledSnapshots[groupId];
-          changed = true;
-          continue;
-        }
-
-        if (!snapshot || typeof snapshot !== 'object') {
-          delete store.disabledSnapshots[groupId];
-          changed = true;
-          continue;
-        }
-
-        for (const itemId of Object.keys(snapshot)) {
-          const missingInCurrentView = !validItemIds.has(itemId);
-          const missingInCurrentScripts = !currentScriptsByItemId.has(itemId);
-          if (protectedPendingKeys.has(itemId)) continue;
-          if (canPruneSnapshotItems && missingInCurrentView && missingInCurrentScripts) {
-            delete snapshot[itemId];
-            changed = true;
-          }
-        }
-
-        if (Object.keys(snapshot).length < 1) {
-          delete store.disabledSnapshots[groupId];
-          changed = true;
-          continue;
-        }
-
-        if (!pendingImportGroupIds.has(groupId) && getFolderItemIds(groupId, items, currentScripts).length < 1) {
-          delete store.disabledSnapshots[groupId];
-          changed = true;
-        }
-      }
-
-      if (changed) saveStore();
+      toast(`已导入${FOLDER_LABEL}“${nextGroupName}”`, 'success');
     }
 
     function applyPanelCollapsedState(headerEl) {
       if (!headerEl) return;
       headerEl.classList.toggle('st-rmg-panel-collapsed', !!panelCollapsed);
-
       const arrowEl = headerEl.querySelector('[data-st-rmg-panel-arrow]');
       if (arrowEl) arrowEl.textContent = panelCollapsed ? '▶' : '▼';
-
-      const titleEl = headerEl.querySelector('[data-st-rmg-panel-toggle]');
-      if (titleEl) {
-        titleEl.setAttribute('aria-expanded', panelCollapsed ? 'false' : 'true');
-        titleEl.setAttribute('title', panelCollapsed ? `点击展开${FOLDER_LABEL}面板` : `点击收起${FOLDER_LABEL}面板`);
-      }
     }
 
     function togglePanelCollapsed(nextValue) {
@@ -1250,155 +605,98 @@
       applyPanelCollapsedState(getHeaderEl());
     }
 
-    function getGroupSignature() {
-      return JSON.stringify(
-        {
-          groups: getGroups().map((group) => ({
-            id: group.id,
-            name: group.name,
-            order: group.order
-          })),
-          ungroupedCount: collectItems().filter((item) => !store.assignments[item.id]).length
-        }
-      );
-    }
-
     function populateGroupSelect(selectEl) {
       if (!selectEl) return;
-
-      const nextSignature = getGroupSignature();
-      const previousValue = selectedGroupId || UNGROUPED_ID;
-
-      if (lastRenderedGroupSignature === nextSignature && selectEl.options.length > 0) {
-        const stillExists = Array.from(selectEl.options).some((option) => option.value === previousValue);
-        if (!stillExists) selectEl.value = selectEl.options[0]?.value || UNGROUPED_ID;
-        return;
-      }
-
-      const groups = getGroups();
       selectEl.innerHTML = '';
 
-      const ungroupedCount = collectItems().filter((item) => !store.assignments[item.id]).length;
-      if (ungroupedCount > 0) {
-        const ungroupedOption = document.createElement('option');
-        ungroupedOption.value = UNGROUPED_ID;
-        ungroupedOption.textContent = UNGROUPED_LABEL;
-        selectEl.appendChild(ungroupedOption);
-      }
+      const ungroupedOption = document.createElement('option');
+      ungroupedOption.value = UNGROUPED_ID;
+      ungroupedOption.textContent = UNGROUPED_LABEL;
+      selectEl.appendChild(ungroupedOption);
 
-      for (const group of groups) {
+      for (const group of getGroups()) {
         const optionEl = document.createElement('option');
         optionEl.value = group.id;
         optionEl.textContent = group.name;
         selectEl.appendChild(optionEl);
       }
-
-      selectEl.value = Array.from(selectEl.options).some((option) => option.value === previousValue)
-        ? previousValue
-        : (selectEl.options[0]?.value || '');
-      selectedGroupId = selectEl.value || UNGROUPED_ID;
-      lastRenderedGroupSignature = nextSignature;
     }
 
     function renderGroupManager(containerEl) {
       if (!containerEl) return;
+
       containerEl.innerHTML = `
-        <div class="st-rmg-group-actions-container">
-          <div class="st-rmg-group-actions st-rmg-group-actions-primary">
-            <button type="button" class="menu_button interactable" id="${NEW_GROUP_ID}">新增${FOLDER_LABEL}</button>
-            <button type="button" class="menu_button interactable" id="${IMPORT_GROUP_PANEL_ID}">导入${FOLDER_LABEL}</button>
-            <button type="button" class="menu_button interactable" id="${RENAME_GROUP_ID}">重命名${FOLDER_LABEL}</button>
-          </div>
-          <div class="st-rmg-group-actions st-rmg-group-actions-danger st-rmg-danger-actions">
-            <button type="button" class="menu_button interactable st-rmg-danger" id="${DELETE_GROUP_ID}">删除${FOLDER_LABEL}</button>
-            <button type="button" class="menu_button interactable st-rmg-danger" id="${DELETE_GROUP_WITH_SCRIPTS_ID}">删除${FOLDER_LABEL}及正则</button>
-          </div>
+        <div class="st-rmg-group-actions">
+          <button type="button" class="menu_button interactable" id="${NEW_GROUP_ID}">新增${FOLDER_LABEL}</button>
+          <button type="button" class="menu_button interactable" id="${IMPORT_GROUP_PANEL_ID}">导入${FOLDER_LABEL}</button>
+          <button type="button" class="menu_button interactable" id="${RENAME_GROUP_ID}">重命名${FOLDER_LABEL}</button>
+          <button type="button" class="menu_button interactable st-rmg-danger" id="${DELETE_GROUP_ID}">删除${FOLDER_LABEL}</button>
+          <button type="button" class="menu_button interactable st-rmg-danger" id="${DELETE_GROUP_WITH_SCRIPTS_ID}">删除${FOLDER_LABEL}及正则</button>
         </div>
-        <div class="st-rmg-group-select-row">
-          <select id="${GROUP_SELECT_ID}" class="text_pole st-rmg-group-select"></select>
-        </div>
+        <select id="${GROUP_SELECT_ID}" class="text_pole st-rmg-group-select"></select>
       `;
 
-      const selectEl = containerEl.querySelector(`#${GROUP_SELECT_ID}`);
-      populateGroupSelect(selectEl);
-
+      populateGroupSelect(containerEl.querySelector(`#${GROUP_SELECT_ID}`));
       updateGroupActionState(containerEl);
     }
 
     function updateGroupActionState(containerEl) {
       if (!containerEl) return;
-
-      const selectEl = containerEl.querySelector(`#${GROUP_SELECT_ID}`);
-      selectedGroupId = String(selectEl?.value || UNGROUPED_ID);
-      const canEditGroup = selectedGroupId !== UNGROUPED_ID && getGroups().some((group) => group.id === selectedGroupId);
-      const renameBtn = containerEl.querySelector(`#${RENAME_GROUP_ID}`);
-      const deleteBtn = containerEl.querySelector(`#${DELETE_GROUP_ID}`);
-      const deleteWithScriptsBtn = containerEl.querySelector(`#${DELETE_GROUP_WITH_SCRIPTS_ID}`);
-      if (renameBtn) renameBtn.disabled = !canEditGroup;
-      if (deleteBtn) deleteBtn.disabled = !canEditGroup;
-      if (deleteWithScriptsBtn) deleteWithScriptsBtn.disabled = !canEditGroup;
+      const selectedGroupId = String(containerEl.querySelector(`#${GROUP_SELECT_ID}`)?.value || UNGROUPED_ID);
+      const canEditGroup = selectedGroupId !== UNGROUPED_ID && !!getGroupById(selectedGroupId);
+      for (const buttonId of [RENAME_GROUP_ID, DELETE_GROUP_ID, DELETE_GROUP_WITH_SCRIPTS_ID]) {
+        const btn = containerEl.querySelector(`#${buttonId}`);
+        if (btn) btn.disabled = !canEditGroup;
+      }
     }
 
-    function renderGroupedList(items) {
+    function renderGroupedList(items, currentScripts) {
       const listEl = getListEl();
       if (!listEl) return;
-
-      const currentScripts = getScriptsByCurrentScope();
-      const groups = getGroups();
-      const itemsByGroup = new Map();
-      itemsByGroup.set(UNGROUPED_ID, []);
-      for (const group of groups) itemsByGroup.set(group.id, []);
-
-      for (const item of items) {
-        const groupId = store.assignments[item.id];
-        if (groupId && itemsByGroup.has(groupId)) itemsByGroup.get(groupId).push(item);
-        else itemsByGroup.get(UNGROUPED_ID).push(item);
-      }
 
       for (const child of Array.from(listEl.children)) {
         if (child.classList.contains('st-rmg-group-header') || child.classList.contains('st-rmg-sort-anchor')) child.remove();
       }
 
+      const itemsByGroup = new Map();
+      itemsByGroup.set(UNGROUPED_ID, []);
+      for (const group of getGroups()) itemsByGroup.set(group.id, []);
+
+      for (const item of items) {
+        const script = getScriptByItem(item, currentScripts);
+        const scriptId = normalizeName(script?.id);
+        const groupId = scriptId ? (getAssignedGroupIdForScriptId(scriptId) || UNGROUPED_ID) : UNGROUPED_ID;
+        if (itemsByGroup.has(groupId)) itemsByGroup.get(groupId).push(item);
+        else itemsByGroup.get(UNGROUPED_ID).push(item);
+      }
+
       listEl.classList.add(GROUPING_CLASS);
       const fragment = document.createDocumentFragment();
 
-      const showUngrouped = (itemsByGroup.get(UNGROUPED_ID) || []).length > 0;
-      if (!showUngrouped && store.collapsed[UNGROUPED_ID]) {
-        delete store.collapsed[UNGROUPED_ID];
-        saveStore();
-      }
-
       function pushHeader(groupId, title, count) {
+        const isUngrouped = groupId === UNGROUPED_ID;
+        const folderState = getFolderState(groupId);
         const header = document.createElement('div');
-        header.className = 'st-rmg-group-header';
+        header.className = `st-rmg-group-header${isUngrouped ? ' st-rmg-system-folder' : ' st-rmg-folder-draggable'}`;
+        if (folderState === STATE_DISABLED) header.classList.add('st-rmg-folder-disabled');
         header.dataset.groupId = groupId;
-        if (groupId !== UNGROUPED_ID) {
-          header.classList.add('st-rmg-folder-draggable');
-        }
-        const folderState = getFolderState(groupId, items, currentScripts);
-        const toggleTitle = folderState === STATE_DISABLED ? `启用${FOLDER_LABEL}` : `关闭${FOLDER_LABEL}`;
-        if (folderState === STATE_DISABLED) {
-          header.classList.add('st-rmg-folder-disabled');
-        }
         header.innerHTML = `
-          <span class="st-rmg-folder-handle" draggable="true" ${groupId !== UNGROUPED_ID ? 'title="拖动排序" aria-label="拖动排序"' : 'title="不可拖拽" aria-label="不可拖拽"'}>&#8801;</span>
+          <span class="st-rmg-folder-handle" draggable="${isUngrouped ? 'false' : 'true'}" title="${isUngrouped ? `${UNGROUPED_LABEL}不可拖动` : '拖动排序'}" aria-label="${isUngrouped ? `${UNGROUPED_LABEL}不可拖动` : '拖动排序'}">&#8801;</span>
           <span class="st-rmg-group-labels">
             <span class="st-rmg-group-name">${escapeHtml(title)}</span>
             <span class="st-rmg-group-count">(${count})</span>
           </span>
           <span class="st-rmg-folder-controls">
-            <span class="st-rmg-folder-actions">
-              <button type="button" class="menu_button interactable st-rmg-folder-action" data-folder-export="${escapeHtml(groupId)}" title="导出当前${FOLDER_LABEL}" aria-label="导出当前${FOLDER_LABEL}">
+            <span class="${isUngrouped ? 'st-rmg-folder-actions is-placeholder' : 'st-rmg-folder-actions'}">
+              <button type="button" class="menu_button interactable st-rmg-folder-action${isUngrouped ? ' st-rmg-folder-action-placeholder' : ''}" ${isUngrouped ? 'disabled data-folder-export-disabled="true"' : `data-folder-export="${escapeHtml(groupId)}"`} title="${isUngrouped ? `${UNGROUPED_LABEL}不可导出` : `导出当前${FOLDER_LABEL}`}">
                 <span class="st-rmg-folder-export-icon" aria-hidden="true">
                   <span class="st-rmg-folder-export-arrow">↑</span>
                   <span class="st-rmg-folder-export-tray"></span>
                 </span>
               </button>
             </span>
-            <button type="button" class="st-rmg-folder-switch ${folderState === STATE_DISABLED ? 'is-off' : 'is-on'}" data-folder-toggle="${escapeHtml(groupId)}" title="${escapeHtml(toggleTitle)}" aria-pressed="${folderState === STATE_DISABLED ? 'false' : 'true'}">
-              <span class="st-rmg-folder-switch-track">
-                <span class="st-rmg-folder-switch-thumb"></span>
-              </span>
+            <button type="button" class="st-rmg-folder-switch ${folderState === STATE_DISABLED ? 'is-off' : 'is-on'}" data-folder-toggle="${escapeHtml(groupId)}" aria-pressed="${folderState === STATE_DISABLED ? 'false' : 'true'}">
+              <span class="st-rmg-folder-switch-track"><span class="st-rmg-folder-switch-thumb"></span></span>
             </button>
             <span class="st-rmg-group-arrow">${store.collapsed[groupId] ? '>' : 'v'}</span>
           </span>
@@ -1407,77 +705,55 @@
 
         const anchor = document.createElement('div');
         anchor.className = 'regex-script-label st-rmg-sort-anchor';
-        anchor.id = `st-rmg-anchor-${scope}-${groupId}`;
         anchor.dataset.groupId = groupId;
         anchor.setAttribute('aria-hidden', 'true');
         fragment.appendChild(anchor);
       }
 
-      function pushItem(item, hidden) {
-        item.el.classList.toggle(HIDDEN_CLASS, hidden);
-        const groupId = store.assignments[item.id] || UNGROUPED_ID;
-        const isFolderDisabled = getFolderState(groupId, items, currentScripts) === STATE_DISABLED;
-        item.el.classList.toggle('st-rmg-folder-item-disabled', isFolderDisabled);
-        item.el.classList.toggle('st-rmg-folder-item-locked', isFolderDisabled);
-        const disableCheckbox = item.el.querySelector?.('.disable_regex');
-        if (disableCheckbox instanceof HTMLElement) {
-          disableCheckbox.disabled = isFolderDisabled;
-          disableCheckbox.title = isFolderDisabled ? `当前${FOLDER_LABEL}已关闭，无法单独切换` : '';
-        }
-        item.el.style.removeProperty('order');
-        fragment.appendChild(item.el);
-      }
-
-      if (showUngrouped) {
-        pushHeader(UNGROUPED_ID, UNGROUPED_LABEL, itemsByGroup.get(UNGROUPED_ID).length);
-        for (const item of itemsByGroup.get(UNGROUPED_ID)) {
-          pushItem(item, !!store.collapsed[UNGROUPED_ID]);
+      function pushItems(groupId, groupItems) {
+        for (const item of groupItems) {
+          const hidden = !!store.collapsed[groupId];
+          item.el.classList.toggle(HIDDEN_CLASS, hidden);
+          applyFolderStateToItem(item, groupId);
+          fragment.appendChild(item.el);
         }
       }
 
-      for (const group of groups) {
+      pushHeader(UNGROUPED_ID, UNGROUPED_LABEL, itemsByGroup.get(UNGROUPED_ID).length);
+      pushItems(UNGROUPED_ID, itemsByGroup.get(UNGROUPED_ID));
+
+      for (const group of getGroups()) {
         const groupItems = itemsByGroup.get(group.id) || [];
         pushHeader(group.id, group.name, groupItems.length);
-        for (const item of groupItems) {
-          pushItem(item, !!store.collapsed[group.id]);
-        }
+        pushItems(group.id, groupItems);
       }
 
       listEl.appendChild(fragment);
     }
 
-    function syncAssignmentsFromRenderedLayout(listEl = getListEl()) {
-      if (!listEl) return false;
+    function syncAssignmentsFromRenderedLayout() {
+      const listEl = getListEl();
+      if (!listEl) return;
 
-      const validGroupIds = new Set(store.groups.map((group) => group.id));
       let currentGroupId = UNGROUPED_ID;
-      let changed = false;
-
       for (const child of Array.from(listEl.children)) {
         if (child.classList?.contains('st-rmg-group-header')) {
-          const groupId = String(child.dataset.groupId || UNGROUPED_ID);
-          currentGroupId = groupId === UNGROUPED_ID || validGroupIds.has(groupId) ? groupId : UNGROUPED_ID;
+          currentGroupId = String(child.dataset.groupId || UNGROUPED_ID);
           continue;
         }
 
-        if (child.classList?.contains('st-rmg-sort-anchor')) continue;
-        if (!child.classList?.contains('regex-script-label')) continue;
-
+        if (!child.classList?.contains('regex-script-label') || child.classList.contains('st-rmg-sort-anchor')) continue;
         const itemId = getItemId(child);
-        const nextGroupId = currentGroupId === UNGROUPED_ID ? null : currentGroupId;
-        const previousGroupId = store.assignments[itemId] ?? null;
-        if (previousGroupId === nextGroupId) continue;
-
-        if (nextGroupId === null) delete store.assignments[itemId];
-        else store.assignments[itemId] = nextGroupId;
-        changed = true;
+        const scriptId = normalizeName(itemId).startsWith('dom:') ? normalizeName(itemId).slice(4) : normalizeName(getItemKeyCandidate(child));
+        if (!scriptId) continue;
+        setAssignedGroupIdForScriptId(scriptId, currentGroupId);
       }
 
-      if (changed) saveStore();
-      return changed;
+      saveStore();
     }
 
-    function syncNativeSortableOptions(listEl = getListEl()) {
+    function bindNativeSortableEvents() {
+      const listEl = getListEl();
       const $ = getJQuery();
       if (!listEl || typeof $ !== 'function' || !$.fn?.sortable) return;
 
@@ -1488,519 +764,86 @@
         sortable.sortable('option', 'items', '> .regex-script-label:not(.st-rmg-hidden), > .st-rmg-sort-anchor');
         sortable.sortable('option', 'cancel', '.st-rmg-group-header');
         sortable.sortable('option', 'tolerance', 'pointer');
-        sortable.sortable('refresh');
-      } catch {
-        // ignore
-      }
-    }
 
-    function getPointerClientPosition(event) {
-      const source = event?.originalEvent || event;
-      const pageX = Number(source?.pageX ?? event?.pageX);
-      const pageY = Number(source?.pageY ?? event?.pageY);
-      const clientX = Number(source?.clientX ?? event?.clientX ?? (Number.isFinite(pageX) ? pageX - window.pageXOffset : NaN));
-      const clientY = Number(source?.clientY ?? event?.clientY ?? (Number.isFinite(pageY) ? pageY - window.pageYOffset : NaN));
+        const originalStart = sortable.sortable('option', 'start');
+        const originalSort = sortable.sortable('option', 'sort');
+        const originalStop = sortable.sortable('option', 'stop');
 
-      if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return null;
-      return { clientX, clientY };
-    }
+        if (sortable.data('stRmgBound')) return;
+        sortable.data('stRmgBound', true);
 
-    function movePlaceholderIntoHoveredGroup(listEl, event, ui) {
-      const placeholderEl = ui?.placeholder?.[0];
-      if (!placeholderEl || typeof document.elementsFromPoint !== 'function') return;
-
-      const pointer = getPointerClientPosition(event);
-      if (!pointer) return;
-
-      const hoveredElements = document.elementsFromPoint(pointer.clientX, pointer.clientY);
-      const hoveredTarget = hoveredElements.find((el) => {
-        if (!(el instanceof HTMLElement)) return false;
-        if (el.classList.contains('ui-sortable-helper') || el.classList.contains('ui-sortable-placeholder')) return false;
-        return !!el.closest('.st-rmg-group-header, .st-rmg-sort-anchor');
-      });
-
-      const groupMarkerEl = hoveredTarget?.closest?.('.st-rmg-group-header, .st-rmg-sort-anchor');
-      if (!groupMarkerEl || groupMarkerEl.parentElement !== listEl) return;
-
-      const anchorEl = groupMarkerEl.classList.contains('st-rmg-sort-anchor')
-        ? groupMarkerEl
-        : groupMarkerEl.nextElementSibling;
-
-      if (!anchorEl?.classList?.contains('st-rmg-sort-anchor')) return;
-      if (placeholderEl.nextElementSibling === anchorEl) return;
-
-      anchorEl.insertAdjacentElement('beforebegin', placeholderEl);
-    }
-
-    function getGroupIdForListChild(listEl, childEl) {
-      if (!(childEl instanceof HTMLElement) || childEl.parentElement !== listEl) return undefined;
-
-      if (childEl.classList.contains('st-rmg-group-header')) {
-        return String(childEl.dataset.groupId || UNGROUPED_ID);
-      }
-
-      if (childEl.classList.contains('st-rmg-sort-anchor')) {
-        return String(childEl.dataset.groupId || UNGROUPED_ID);
-      }
-
-      if (childEl.classList.contains('regex-script-label')) {
-        let probe = childEl.previousElementSibling;
-        while (probe) {
-          if (probe.classList?.contains('st-rmg-sort-anchor')) {
-            return String(probe.dataset.groupId || UNGROUPED_ID);
-          }
-          if (probe.classList?.contains('st-rmg-group-header')) {
-            return String(probe.dataset.groupId || UNGROUPED_ID);
-          }
-          probe = probe.previousElementSibling;
-        }
-        return UNGROUPED_ID;
-      }
-
-      return undefined;
-    }
-
-    function getGroupIdFromPointer(listEl, event) {
-      if (typeof document.elementsFromPoint !== 'function') return undefined;
-
-      const pointer = getPointerClientPosition(event);
-      if (!pointer) return undefined;
-
-      const hoveredElements = document.elementsFromPoint(pointer.clientX, pointer.clientY);
-      for (const hoveredEl of hoveredElements) {
-        if (!(hoveredEl instanceof HTMLElement)) continue;
-        if (hoveredEl.classList.contains('ui-sortable-helper') || hoveredEl.classList.contains('ui-sortable-placeholder')) continue;
-
-        const listChild = hoveredEl.closest('.st-rmg-group-header, .st-rmg-sort-anchor, .regex-script-label');
-        const groupId = getGroupIdForListChild(listEl, listChild);
-        if (groupId !== undefined) return groupId;
-      }
-
-      return undefined;
-    }
-
-    function getFolderHeaderByGroupId(listEl, groupId) {
-      if (!listEl || !groupId) return null;
-      return Array.from(listEl.querySelectorAll('.st-rmg-group-header')).find((headerEl) => headerEl.dataset.groupId === groupId) || null;
-    }
-
-    function clearFolderDropIndicators(listEl = getListEl()) {
-      if (!listEl) return;
-      for (const headerEl of listEl.querySelectorAll('.st-rmg-group-header')) {
-        headerEl.classList.remove('st-rmg-folder-dragging', 'st-rmg-folder-drop-before', 'st-rmg-folder-drop-after');
-      }
-    }
-
-    function updateFolderDropIndicator(listEl, targetGroupId, placeAfter) {
-      clearFolderDropIndicators(listEl);
-
-      if (draggingFolderId) {
-        getFolderHeaderByGroupId(listEl, draggingFolderId)?.classList.add('st-rmg-folder-dragging');
-      }
-
-      if (!targetGroupId) return;
-      const targetHeaderEl = getFolderHeaderByGroupId(listEl, targetGroupId);
-      if (!targetHeaderEl) return;
-      targetHeaderEl.classList.add(placeAfter ? 'st-rmg-folder-drop-after' : 'st-rmg-folder-drop-before');
-    }
-
-    function reorderFolders(draggedGroupId, targetGroupId, placeAfter) {
-      if (!draggedGroupId || !targetGroupId || draggedGroupId === targetGroupId) return false;
-
-      const orderedGroups = getGroups().map((group) => ({ ...group }));
-      const draggedIndex = orderedGroups.findIndex((group) => group.id === draggedGroupId);
-      if (draggedIndex < 0) return false;
-
-      const [draggedGroup] = orderedGroups.splice(draggedIndex, 1);
-      const targetIndex = orderedGroups.findIndex((group) => group.id === targetGroupId);
-      if (targetIndex < 0) return false;
-
-      const insertIndex = targetIndex + (placeAfter ? 1 : 0);
-      orderedGroups.splice(insertIndex, 0, draggedGroup);
-      store.groups = orderedGroups.map((group, index) => ({ ...group, order: index + 1 }));
-      saveStore();
-      renderTree();
-      return true;
-    }
-
-    function bindNativeSortableEvents(listEl = getListEl()) {
-      const $ = getJQuery();
-      if (!listEl || typeof $ !== 'function' || !$.fn?.sortable) return;
-
-      try {
-        const sortable = $(listEl);
-        const instance = sortable.sortable('instance');
-        if (!instance) return;
-
-        const currentStart = sortable.sortable('option', 'start');
-        const currentSort = sortable.sortable('option', 'sort');
-        const currentStop = sortable.sortable('option', 'stop');
-        if (
-          currentStart === listEl.__stRmgWrappedStart
-          && currentSort === listEl.__stRmgWrappedSort
-          && currentStop === listEl.__stRmgWrappedStop
-        ) return;
-
-        const originalStart = typeof currentStart === 'function' ? currentStart : null;
-        const originalSort = typeof currentSort === 'function' ? currentSort : null;
-        const originalStop = typeof currentStop === 'function' ? currentStop : null;
-
-        const wrappedStart = function (event, ui) {
+        sortable.sortable('option', 'start', function (event, ui) {
           sorting = true;
           sortingItemId = getItemId(ui?.item?.[0]);
           sortingTargetGroupId = undefined;
-          pauseListObserver();
-          return originalStart ? originalStart.call(this, event, ui) : undefined;
-        };
+          return typeof originalStart === 'function' ? originalStart.call(this, event, ui) : undefined;
+        });
 
-        const wrappedSort = function (event, ui) {
-          const hoveredGroupId = getGroupIdFromPointer(listEl, event);
-          if (hoveredGroupId !== undefined) sortingTargetGroupId = hoveredGroupId;
-          movePlaceholderIntoHoveredGroup(listEl, event, ui);
-          return originalSort ? originalSort.call(this, event, ui) : undefined;
-        };
+        sortable.sortable('option', 'sort', function (event, ui) {
+          const pointerY = Number(event?.clientY ?? event?.originalEvent?.clientY);
+          if (Number.isFinite(pointerY)) {
+            const hovered = Array.from(listEl.querySelectorAll('.st-rmg-group-header, .st-rmg-sort-anchor')).find((el) => {
+              const rect = el.getBoundingClientRect();
+              return pointerY >= rect.top && pointerY <= rect.bottom;
+            });
+            sortingTargetGroupId = hovered?.dataset?.groupId || sortingTargetGroupId;
+          }
+          return typeof originalSort === 'function' ? originalSort.call(this, event, ui) : undefined;
+        });
 
-        const wrappedStop = function (...args) {
-          const previousGroupId = sortingItemId ? (store.assignments[sortingItemId] ?? null) : null;
-
+        sortable.sortable('option', 'stop', function (...args) {
           if (sortingItemId) {
-            if (!sortingTargetGroupId || sortingTargetGroupId === UNGROUPED_ID) delete store.assignments[sortingItemId];
-            else store.assignments[sortingItemId] = sortingTargetGroupId;
+            const scriptId = normalizeName(sortingItemId).startsWith('dom:') ? normalizeName(sortingItemId).slice(4) : '';
+            if (scriptId) setAssignedGroupIdForScriptId(scriptId, sortingTargetGroupId || UNGROUPED_ID);
             saveStore();
           }
 
-          syncAssignmentsFromRenderedLayout(listEl);
-          const result = originalStop ? originalStop.apply(this, args) : undefined;
-
-          Promise.resolve(result)
-            .catch(() => { })
-            .then(async () => {
-              if (!sortingItemId) return;
-              const nextGroupId = store.assignments[sortingItemId] ?? null;
-              await syncItemDisabledStateForAssignmentChange(sortingItemId, previousGroupId, nextGroupId);
-            })
-            .finally(() => {
-              sorting = false;
-              sortingItemId = '';
-              sortingTargetGroupId = undefined;
-              schedule(() => {
-                renderTree();
-              });
-            });
-
+          const result = typeof originalStop === 'function' ? originalStop.apply(this, args) : undefined;
+          Promise.resolve(result).finally(async () => {
+            sorting = false;
+            sortingItemId = '';
+            sortingTargetGroupId = undefined;
+            syncAssignmentsFromRenderedLayout();
+            await renderTree();
+          });
           return result;
-        };
-
-        listEl.__stRmgWrappedStart = wrappedStart;
-        listEl.__stRmgWrappedSort = wrappedSort;
-        listEl.__stRmgWrappedStop = wrappedStop;
-        sortable.sortable('option', 'start', wrappedStart);
-        sortable.sortable('option', 'sort', wrappedSort);
-        sortable.sortable('option', 'stop', wrappedStop);
+        });
       } catch {
         // ignore
       }
     }
 
-    async function syncItemDisabledStateForAssignmentChange(itemId, previousGroupId, nextGroupId) {
-      const normalizedItemId = normalizeName(itemId);
-      if (!normalizedItemId || normalizedItemId === 'item:unknown') return false;
+    function reorderFolders(draggedGroupId, targetGroupId, placeAfter) {
+      if (!draggedGroupId || !targetGroupId || draggedGroupId === targetGroupId) return;
+      const orderedGroups = getGroups().map((group) => ({ ...group }));
+      const draggedIndex = orderedGroups.findIndex((group) => group.id === draggedGroupId);
+      const targetIndex = orderedGroups.findIndex((group) => group.id === targetGroupId);
+      if (draggedIndex < 0 || targetIndex < 0) return;
 
-      const ctx = getCtx();
-      const currentScripts = getScriptsByCurrentScope(ctx);
-      if (!Array.isArray(currentScripts) || currentScripts.length < 1) return false;
-
-      const normalizedPreviousGroupId = previousGroupId ? String(previousGroupId) : null;
-      const normalizedNextGroupId = nextGroupId ? String(nextGroupId) : null;
-      const previousFolderDisabled = !!store.disabledFolders?.[normalizedPreviousGroupId || UNGROUPED_ID];
-      const nextFolderDisabled = !!store.disabledFolders?.[normalizedNextGroupId || UNGROUPED_ID];
-
-      if (!previousFolderDisabled && !nextFolderDisabled) return false;
-
-      const scriptId = normalizedItemId.startsWith('dom:') ? normalizedItemId.slice(4) : '';
-      if (!scriptId) return false;
-
-      const scriptIndex = currentScripts.findIndex((script) => normalizeName(script?.id) === scriptId);
-      if (scriptIndex < 0) return false;
-
-      const currentScript = currentScripts[scriptIndex];
-      const nextScripts = currentScripts.slice();
-      const nextScript = { ...currentScript };
-      let scriptsChanged = false;
-      let storeChanged = false;
-
-      if (!store.disabledSnapshots || typeof store.disabledSnapshots !== 'object') {
-        store.disabledSnapshots = {};
-      }
-
-      const previousSnapshot = normalizedPreviousGroupId && store.disabledSnapshots?.[normalizedPreviousGroupId]
-        && typeof store.disabledSnapshots[normalizedPreviousGroupId] === 'object'
-        ? store.disabledSnapshots[normalizedPreviousGroupId]
-        : null;
-      const hadPreviousSnapshot = !!previousSnapshot && Object.prototype.hasOwnProperty.call(previousSnapshot, normalizedItemId);
-      const previousRecordedDisabled = hadPreviousSnapshot ? !!previousSnapshot[normalizedItemId] : !!currentScript.disabled;
-
-      if (previousFolderDisabled && previousSnapshot && hadPreviousSnapshot) {
-        delete previousSnapshot[normalizedItemId];
-        storeChanged = true;
-        if (Object.keys(previousSnapshot).length < 1 && normalizedPreviousGroupId) {
-          delete store.disabledSnapshots[normalizedPreviousGroupId];
-        }
-      }
-
-      if (nextFolderDisabled) {
-        if (!normalizedNextGroupId) return storeChanged;
-
-        if (!store.disabledSnapshots[normalizedNextGroupId] || typeof store.disabledSnapshots[normalizedNextGroupId] !== 'object') {
-          store.disabledSnapshots[normalizedNextGroupId] = {};
-          storeChanged = true;
-        }
-
-        const nextSnapshot = store.disabledSnapshots[normalizedNextGroupId];
-        if (!Object.prototype.hasOwnProperty.call(nextSnapshot, normalizedItemId) || !!nextSnapshot[normalizedItemId] !== previousRecordedDisabled) {
-          nextSnapshot[normalizedItemId] = previousRecordedDisabled;
-          storeChanged = true;
-        }
-
-        if (!nextScript.disabled) {
-          nextScript.disabled = true;
-          scriptsChanged = true;
-        }
-      } else if (previousFolderDisabled) {
-        if (!!nextScript.disabled !== previousRecordedDisabled) {
-          nextScript.disabled = previousRecordedDisabled;
-          scriptsChanged = true;
-        }
-      }
-
-      if (storeChanged) {
-        saveStore();
-      }
-
-      if (scriptsChanged) {
-        nextScripts[scriptIndex] = nextScript;
-        await saveScriptsForCurrentScope(nextScripts, ctx);
-        await reloadRegexUi(ctx);
-      }
-
-      return storeChanged || scriptsChanged;
-    }
-
-    async function addGroup() {
-      const promptResult = await openPrompt(`输入${FOLDER_LABEL}名称，例如 A文件夹 / B文件夹`);
-      if (promptResult === null) return;
-
-      const name = validateGroupName(promptResult);
-      if (!name) return;
-
-      store.groups.push({
-        id: uid('group'),
-        name,
-        order: store.groups.length + 1
-      });
+      const [draggedGroup] = orderedGroups.splice(draggedIndex, 1);
+      orderedGroups.splice(targetIndex + (placeAfter ? 1 : 0), 0, draggedGroup);
+      store.groups = orderedGroups.map((group, index) => ({ ...group, order: index + 1 }));
       saveStore();
       renderTree();
-    }
-
-    async function renameGroup(groupId) {
-      const group = store.groups.find((entry) => entry.id === groupId);
-      if (!group) return;
-
-      const promptResult = await openPrompt(`输入新的${FOLDER_LABEL}名称`, group.name);
-      if (promptResult === null) return;
-
-      const nextName = validateGroupName(promptResult, group.id);
-      if (!nextName) return;
-
-      group.name = nextName;
-      saveStore();
-      renderTree();
-    }
-
-    async function deleteGroup(groupId) {
-      const group = store.groups.find((entry) => entry.id === groupId);
-      if (!group) return;
-
-      const ok = await openConfirm(`删除${FOLDER_LABEL}“${group.name}”后，该${FOLDER_LABEL}中的正则会回到${UNGROUPED_LABEL}，是否继续？`);
-      if (!ok) return;
-
-      if (store.disabledFolders?.[groupId]) {
-        delete store.disabledFolders[groupId];
-        await applyFolderDisabledState(groupId, true, collectItems());
-      }
-      delete store.disabledSnapshots[groupId];
-
-      store.groups = store.groups.filter((entry) => entry.id !== groupId);
-      for (const [itemId, assignedGroupId] of Object.entries(store.assignments)) {
-        if (assignedGroupId === groupId) delete store.assignments[itemId];
-      }
-      delete store.collapsed[groupId];
-      saveStore();
-      renderTree();
-    }
-
-    async function deleteGroupAndScripts(groupId) {
-      const group = store.groups.find((entry) => entry.id === groupId);
-      if (!group || groupId === UNGROUPED_ID) return;
-
-      const ctx = getCtx();
-      const currentScripts = getScriptsByCurrentScope(ctx);
-      if (!Array.isArray(currentScripts)) {
-        toast('当前范围的正则列表不可用，删除失败', 'error');
-        return;
-      }
-
-      const folderItemIds = new Set(getFolderItemIds(groupId, collectItems(), currentScripts));
-      const targetScriptIds = new Set(
-        Array.from(folderItemIds)
-          .map((itemId) => getScriptIdFromItemId(itemId))
-          .filter(Boolean)
-      );
-      const removedCount = currentScripts.filter((script) => targetScriptIds.has(normalizeName(script?.id))).length;
-
-      const ok = await openConfirm(`删除${FOLDER_LABEL}“${group.name}”以及其中 ${removedCount} 条正则后将无法恢复，是否继续？`);
-      if (!ok) return;
-
-      const nextScripts = currentScripts.filter((script) => !targetScriptIds.has(normalizeName(script?.id)));
-      await saveScriptsForCurrentScope(nextScripts, ctx);
-      removeScriptsFromCurrentList(Array.from(targetScriptIds));
-
-      store.groups = store.groups.filter((entry) => entry.id !== groupId);
-      pendingImportedAssignments = (pendingImportedAssignments || []).filter((entry) => entry.groupId !== groupId && !targetScriptIds.has(normalizeName(entry?.scriptId)));
-      for (const itemId of Object.keys(store.assignments)) {
-        const assignedGroupId = store.assignments[itemId];
-        if (assignedGroupId === groupId || targetScriptIds.has(getScriptIdFromItemId(itemId))) {
-          delete store.assignments[itemId];
-        }
-      }
-      delete store.collapsed[groupId];
-      delete store.disabledFolders[groupId];
-      delete store.disabledSnapshots[groupId];
-
-      saveStore();
-      await reloadRegexUi(ctx);
-      refreshAllPanels();
-      await renderTree();
-      toast(`已删除${FOLDER_LABEL}“${group.name}”及其中 ${removedCount} 条正则`, 'success');
-    }
-
-    async function renderTree() {
-      const headerEl = getHeaderEl();
-      const listEl = getListEl();
-      if (!headerEl || !listEl) return;
-
-      loadStoreForCurrentContext();
-      pauseListObserver();
-      rendering = true;
-      try {
-        const items = collectItems(listEl);
-        activeNativeOrderCache.clear();
-        for (let i = 0; i < items.length; i++) {
-          activeNativeOrderCache.set(items[i].id, i);
-        }
-        
-        migrateLegacyAssignments(items);
-        if (alignImportedAssignments(items)) saveStore();
-        cleanupAssignments(items);
-        renderGroupedList(items);
-        syncNativeSortableOptions(listEl);
-        bindNativeSortableEvents(listEl);
-        renderGroupManager(headerEl.querySelector('.st-rmg-group-manager'));
-      } finally {
-        rendering = false;
-        startListObserver(listEl);
-        if (pendingViewportRestore) {
-          const restoreState = pendingViewportRestore;
-          pendingViewportRestore = null;
-          schedule(() => {
-            restoreViewportState(restoreState);
-          });
-        }
-      }
-    }
-
-    function bindHeaderEvents(headerEl) {
-      const panelToggleEl = headerEl.querySelector('[data-st-rmg-panel-toggle]');
-      panelToggleEl?.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        togglePanelCollapsed();
-      });
-
-      panelToggleEl?.addEventListener('keydown', (e) => {
-        if (e.key !== 'Enter' && e.key !== ' ') return;
-        e.preventDefault();
-        e.stopPropagation();
-        togglePanelCollapsed();
-      });
-
-      headerEl.addEventListener('change', (e) => {
-        if (e.target?.matches?.(`#${GROUP_SELECT_ID}`)) {
-          updateGroupActionState(headerEl.querySelector('.st-rmg-group-manager'));
-        }
-      });
-
-      headerEl.addEventListener('click', (e) => {
-        const addBtn = e.target?.closest?.(`#${NEW_GROUP_ID}`);
-        if (addBtn) {
-          e.preventDefault();
-          e.stopPropagation();
-          addGroup();
-          return;
-        }
-
-        const importPanelBtn = e.target?.closest?.(`#${IMPORT_GROUP_PANEL_ID}`);
-        if (importPanelBtn) {
-          e.preventDefault();
-          e.stopPropagation();
-          void importGroup();
-          return;
-        }
-
-        const renameBtn = e.target?.closest?.(`#${RENAME_GROUP_ID}`);
-        if (renameBtn) {
-          e.preventDefault();
-          e.stopPropagation();
-          const selectEl = headerEl.querySelector(`#${GROUP_SELECT_ID}`);
-          renameGroup(String(selectEl?.value || ''));
-          return;
-        }
-
-        const deleteBtn = e.target?.closest?.(`#${DELETE_GROUP_ID}`);
-        if (deleteBtn) {
-          e.preventDefault();
-          e.stopPropagation();
-          const selectEl = headerEl.querySelector(`#${GROUP_SELECT_ID}`);
-          deleteGroup(String(selectEl?.value || ''));
-          return;
-        }
-
-        const deleteWithScriptsBtn = e.target?.closest?.(`#${DELETE_GROUP_WITH_SCRIPTS_ID}`);
-        if (deleteWithScriptsBtn) {
-          e.preventDefault();
-          e.stopPropagation();
-          const selectEl = headerEl.querySelector(`#${GROUP_SELECT_ID}`);
-          deleteGroupAndScripts(String(selectEl?.value || ''));
-          return;
-        }
-      });
     }
 
     function bindListEvents(listEl) {
-      if (listEl.dataset.stRmgBound === '1') return;
-      listEl.dataset.stRmgBound = '1';
+      if (listEl.dataset.stRmgListBound === '1') return;
+      listEl.dataset.stRmgListBound = '1';
 
       listEl.addEventListener('click', (e) => {
         const exportBtn = e.target?.closest?.('[data-folder-export]');
         if (exportBtn) {
           e.preventDefault();
           e.stopPropagation();
-          const groupId = String(exportBtn.dataset.folderExport || '');
-          if (groupId === UNGROUPED_ID) {
-            toast(`未分组无法导出`, 'warning');
-          } else if (groupId) {
-            void exportGroup(groupId);
-          }
+          void exportGroup(String(exportBtn.dataset.folderExport || ''));
+          return;
+        }
+
+        const exportDisabledBtn = e.target?.closest?.('[data-folder-export-disabled]');
+        if (exportDisabledBtn) {
+          e.preventDefault();
+          e.stopPropagation();
           return;
         }
 
@@ -2008,10 +851,8 @@
         if (toggleBtn) {
           e.preventDefault();
           e.stopPropagation();
-          toggleBtn.blur?.();
           const groupId = String(toggleBtn.dataset.folderToggle || UNGROUPED_ID);
-          const enabled = toggleBtn.classList.contains('is-off');
-          void setFolderEnabled(groupId, enabled);
+          void setFolderEnabled(groupId, toggleBtn.classList.contains('is-off'));
           return;
         }
 
@@ -2023,15 +864,7 @@
 
         const headerEl = e.target?.closest?.('.st-rmg-group-header');
         if (!headerEl) return;
-
-        if (Date.now() - lastFolderDragEndedAt < 250) {
-          e.preventDefault();
-          e.stopPropagation();
-          return;
-        }
-
-        e.preventDefault();
-        e.stopPropagation();
+        if (Date.now() - lastFolderDragEndedAt < 250) return;
 
         const groupId = String(headerEl.dataset.groupId || UNGROUPED_ID);
         store.collapsed[groupId] = !store.collapsed[groupId];
@@ -2042,20 +875,13 @@
       listEl.addEventListener('dragstart', (e) => {
         const handleEl = e.target?.closest?.('.st-rmg-folder-handle');
         if (!handleEl) return;
-
         const headerEl = handleEl.closest('.st-rmg-group-header.st-rmg-folder-draggable');
         if (!headerEl) {
           e.preventDefault();
-          e.stopPropagation();
-          toast('未分组无法拖拽', 'warning');
           return;
         }
 
         draggingFolderId = String(headerEl.dataset.groupId || '');
-        folderDropTargetId = '';
-        folderDropAfter = false;
-        updateFolderDropIndicator(listEl, '', false);
-
         try {
           e.dataTransfer?.setData?.('text/plain', draggingFolderId);
           if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
@@ -2066,72 +892,120 @@
 
       listEl.addEventListener('dragover', (e) => {
         if (!draggingFolderId) return;
-
         const targetHeaderEl = e.target?.closest?.('.st-rmg-group-header.st-rmg-folder-draggable');
-        if (!targetHeaderEl) {
-          updateFolderDropIndicator(listEl, '', false);
-          return;
-        }
-
-        const targetGroupId = String(targetHeaderEl.dataset.groupId || '');
-        if (!targetGroupId || targetGroupId === draggingFolderId) {
-          updateFolderDropIndicator(listEl, '', false);
-          return;
-        }
-
+        if (!targetHeaderEl) return;
         e.preventDefault();
+        const targetGroupId = String(targetHeaderEl.dataset.groupId || '');
+        if (!targetGroupId || targetGroupId === draggingFolderId) return;
         const rect = targetHeaderEl.getBoundingClientRect();
-        const placeAfter = Number(e.clientY) > rect.top + rect.height / 2;
         folderDropTargetId = targetGroupId;
-        folderDropAfter = placeAfter;
-        updateFolderDropIndicator(listEl, targetGroupId, placeAfter);
-
-        try {
-          if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-        } catch {
-          // ignore
-        }
+        folderDropAfter = Number(e.clientY) > rect.top + rect.height / 2;
       });
 
       listEl.addEventListener('drop', (e) => {
-        if (!draggingFolderId) return;
-        if (!folderDropTargetId || folderDropTargetId === draggingFolderId) return;
-
+        if (!draggingFolderId || !folderDropTargetId || folderDropTargetId === draggingFolderId) return;
         e.preventDefault();
-        e.stopPropagation();
-        lastFolderDragEndedAt = Date.now();
-        clearFolderDropIndicators(listEl);
         reorderFolders(draggingFolderId, folderDropTargetId, folderDropAfter);
         draggingFolderId = '';
         folderDropTargetId = '';
         folderDropAfter = false;
+        lastFolderDragEndedAt = Date.now();
       });
 
       listEl.addEventListener('dragend', () => {
         if (!draggingFolderId) return;
-        lastFolderDragEndedAt = Date.now();
         draggingFolderId = '';
         folderDropTargetId = '';
         folderDropAfter = false;
-        clearFolderDropIndicators(listEl);
+        lastFolderDragEndedAt = Date.now();
       });
     }
 
-    function startListObserver(listEl) {
-      if (listObserver) listObserver.disconnect();
-      if (!listEl || typeof MutationObserver !== 'function') return;
+    function bindHeaderEvents(headerEl) {
+      if (headerEl.dataset.stRmgHeaderBound === '1') return;
+      headerEl.dataset.stRmgHeaderBound = '1';
 
-      let scheduled = false;
-      listObserver = new MutationObserver(() => {
-        if (rendering || sorting || scheduled) return;
-        scheduled = true;
+      headerEl.addEventListener('click', (e) => {
+        const panelToggle = e.target?.closest?.('[data-st-rmg-panel-toggle]');
+        if (panelToggle) {
+          e.preventDefault();
+          togglePanelCollapsed();
+          return;
+        }
+
+        const groupManager = headerEl.querySelector('.st-rmg-group-manager');
+        const selectEl = groupManager?.querySelector(`#${GROUP_SELECT_ID}`);
+        const selectedGroupId = String(selectEl?.value || UNGROUPED_ID);
+
+        if (e.target?.closest?.(`#${NEW_GROUP_ID}`)) {
+          e.preventDefault();
+          void addGroup();
+          return;
+        }
+        if (e.target?.closest?.(`#${IMPORT_GROUP_PANEL_ID}`)) {
+          e.preventDefault();
+          void importGroup();
+          return;
+        }
+        if (e.target?.closest?.(`#${RENAME_GROUP_ID}`)) {
+          e.preventDefault();
+          void renameGroup(selectedGroupId);
+          return;
+        }
+        if (e.target?.closest?.(`#${DELETE_GROUP_ID}`)) {
+          e.preventDefault();
+          void deleteGroup(selectedGroupId);
+          return;
+        }
+        if (e.target?.closest?.(`#${DELETE_GROUP_WITH_SCRIPTS_ID}`)) {
+          e.preventDefault();
+          void deleteGroupAndScripts(selectedGroupId);
+        }
+      });
+
+      headerEl.addEventListener('change', (e) => {
+        if (e.target?.matches?.(`#${GROUP_SELECT_ID}`)) {
+          updateGroupActionState(headerEl.querySelector('.st-rmg-group-manager'));
+        }
+      });
+    }
+
+    function startDomObserver(listEl) {
+      if (domObserver) domObserver.disconnect();
+      if (!listEl || typeof MutationObserver !== 'function') return;
+      let queued = false;
+
+      domObserver = new MutationObserver(() => {
+        if (rendering || sorting || queued) return;
+        queued = true;
         schedule(() => {
-          scheduled = false;
+          queued = false;
           renderTree();
         });
       });
 
-      listObserver.observe(listEl, { childList: true, subtree: true, characterData: true });
+      domObserver.observe(listEl, { childList: true, subtree: false });
+    }
+
+    async function renderTree() {
+      const headerEl = getHeaderEl();
+      const listEl = getListEl();
+      if (!headerEl || !listEl) return;
+
+      loadStoreForCurrentContext();
+      rendering = true;
+      try {
+        const ctx = getCtx();
+        const currentScripts = await ensureScriptsReady(ctx);
+        const items = collectItems(listEl);
+        pruneStore(items, currentScripts);
+        renderGroupedList(items, currentScripts);
+        renderGroupManager(headerEl.querySelector('.st-rmg-group-manager'));
+        bindNativeSortableEvents();
+      } finally {
+        rendering = false;
+        startDomObserver(listEl);
+      }
     }
 
     function ensureMounted() {
@@ -2145,10 +1019,10 @@
         headerEl.id = HEADER_ID;
         headerEl.className = 'st-rmg-header';
         headerEl.innerHTML = `
-          <div class="st-rmg-title-row st-rmg-panel-toggle" data-st-rmg-panel-toggle role="button" tabindex="0" aria-expanded="true">
-            <div class="st-rmg-title-main">
-              <span class="st-rmg-panel-arrow" data-st-rmg-panel-arrow>▼</span>
-              <b>${escapeHtml(titleText)}${FOLDER_LABEL}</b>
+          <div class="st-rmg-title-row">
+            <div class="st-rmg-title-main st-rmg-panel-toggle" data-st-rmg-panel-toggle="true" tabindex="0" role="button" aria-expanded="true">
+              <span class="st-rmg-panel-arrow" data-st-rmg-panel-arrow="true">▼</span>
+              <span>${escapeHtml(titleText)} · ${FOLDER_LABEL}</span>
             </div>
           </div>
           <div class="st-rmg-panel-body">
@@ -2157,38 +1031,28 @@
             </div>
           </div>
         `;
-        blockEl.insertAdjacentElement('afterbegin', headerEl);
-        bindHeaderEvents(headerEl);
+        blockEl.insertBefore(headerEl, listEl);
       }
 
-      applyPanelCollapsedState(headerEl);
+      bindHeaderEvents(headerEl);
       bindListEvents(listEl);
-      renderTree();
+      applyPanelCollapsedState(headerEl);
       return true;
     }
 
-    function tryEnsure() {
-      if (ensureMounted()) return;
-      if (domObserver || typeof MutationObserver !== 'function') return;
-
-      const rootEl = document.body || document.documentElement;
-      if (!rootEl) return;
-
-      domObserver = new MutationObserver(() => {
-        if (ensureMounted() && domObserver) {
-          domObserver.disconnect();
-          domObserver = null;
-        }
-      });
-
-      domObserver.observe(rootEl, { childList: true, subtree: true });
+    async function tryEnsure() {
+      if (!ensureMounted()) return false;
+      await renderTree();
+      return true;
     }
 
-    return { tryEnsure };
+    return {
+      tryEnsure,
+    };
   }
 
   root.features = root.features || {};
   root.features.panelController = {
-    createPanelController
+    createPanelController,
   };
 })();

@@ -900,7 +900,8 @@
         sortable.sortable('option', 'start', function (event, ui) {
           sorting = true;
           sortingItemId = getItemId(ui?.item?.[0]);
-          sortingTargetGroupId = undefined;
+          const currentScriptId = normalizeName(sortingItemId).startsWith('dom:') ? normalizeName(sortingItemId).slice(4) : '';
+          sortingTargetGroupId = currentScriptId ? (getAssignedGroupIdForScriptId(currentScriptId) || UNGROUPED_ID) : UNGROUPED_ID;
           return typeof originalStart === 'function' ? originalStart.call(this, event, ui) : undefined;
         });
 
@@ -917,6 +918,7 @@
           if (sortingItemId) {
             const scriptId = normalizeName(sortingItemId).startsWith('dom:') ? normalizeName(sortingItemId).slice(4) : '';
             if (scriptId) setAssignedGroupIdForScriptId(scriptId, sortingTargetGroupId || UNGROUPED_ID);
+            syncAssignmentsFromRenderedLayout();
             saveStore();
           }
 
@@ -925,7 +927,6 @@
             sorting = false;
             sortingItemId = '';
             sortingTargetGroupId = undefined;
-            syncAssignmentsFromRenderedLayout();
             await renderTree();
           });
           return result;

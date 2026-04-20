@@ -349,24 +349,35 @@
         return false;
       }
 
-      // 建立 item.id -> script 的映射（优先按 dom:scriptId 匹配，其次按下标对齐）
+      // 建立 item.id -> script 的映射
       const itemIdToScript = new Map();
-      const scriptIdToItemId = new Map();
 
       // 第一遍：有 script.id 的走 dom: 匹配
       for (const script of currentScripts) {
         if (!script?.id) continue;
-        const itemId = `dom:${normalizeName(script.id)}`;
-        scriptIdToItemId.set(normalizeName(script.id), itemId);
-        itemIdToScript.set(itemId, script);
+        itemIdToScript.set(`dom:${normalizeName(script.id)}`, script);
       }
 
-      // 第二遍：无 script.id 的按 items 下标对齐
+      // 第二遍：尝试按脚本名称后备匹配（针对 item.id 为 fp:/name: 的预设正则）
+      // 先建立 scriptName -> script 和 scriptName -> index 的查找表
+      const scriptByName = new Map();
+      const scriptIndexByName = new Map();
       for (let i = 0; i < currentScripts.length; i++) {
         const script = currentScripts[i];
-        if (!script || normalizeName(script.id)) continue; // 有 ID 的已处理
-        if (items[i]?.id && !itemIdToScript.has(items[i].id)) {
-          itemIdToScript.set(items[i].id, script);
+        if (!script) continue;
+        const sname = normalizeName(script.scriptName || script.name || '');
+        if (sname && !scriptByName.has(sname)) {
+          scriptByName.set(sname, script);
+          scriptIndexByName.set(sname, i);
+        }
+      }
+
+      // 对每个 folderItem，如果 dom: 路径未命中，用 item.name 查脚本
+      for (const folderItem of folderItems) {
+        if (itemIdToScript.has(folderItem.id)) continue;
+        const fname = normalizeName(folderItem.name);
+        if (fname && scriptByName.has(fname)) {
+          itemIdToScript.set(folderItem.id, scriptByName.get(fname));
         }
       }
 
@@ -387,7 +398,7 @@
         else snapshotChanged = true;
       }
 
-      // 构建脚本 itemId -> 数组下标 的反向索引，用于修改 nextScripts
+      // 构建 itemId -> 数组下标 的反向索引
       const itemIdToIndex = new Map();
       for (let i = 0; i < currentScripts.length; i++) {
         const script = currentScripts[i];
@@ -395,8 +406,14 @@
         const sid = normalizeName(script.id);
         if (sid) {
           itemIdToIndex.set(`dom:${sid}`, i);
-        } else if (items[i]?.id) {
-          itemIdToIndex.set(items[i].id, i);
+        }
+      }
+      // 对名称路径命中的 folderItem，补充下标映射
+      for (const folderItem of folderItems) {
+        if (itemIdToIndex.has(folderItem.id)) continue;
+        const fname = normalizeName(folderItem.name);
+        if (fname && scriptIndexByName.has(fname)) {
+          itemIdToIndex.set(folderItem.id, scriptIndexByName.get(fname));
         }
       }
 

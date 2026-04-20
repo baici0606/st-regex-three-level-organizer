@@ -153,19 +153,24 @@
       if (scriptType === 2) {
         const presetManager = getRegexPresetManager(ctx);
         const presetName = presetManager?.getSelectedPresetName?.();
-        let presetScripts = presetManager?.readPresetExtensionField?.({ name: presetName, path: 'regex_scripts' });
-        if (!Array.isArray(presetScripts)) presetScripts = presetManager?.readPresetExtensionField?.({ path: 'regex_scripts' });
-        if (Array.isArray(presetScripts)) return presetScripts;
+
+        const possiblePaths = ['regex', 'regex_scripts', 'scripts'];
+        for (const p of possiblePaths) {
+          let presetScripts = presetManager?.readPresetExtensionField?.({ name: presetName, path: p });
+          if (!Array.isArray(presetScripts)) presetScripts = presetManager?.readPresetExtensionField?.({ path: p });
+          if (Array.isArray(presetScripts)) return presetScripts;
+        }
 
         const presetObj = root.utils.getSelectedRegexPreset?.(ctx);
         if (presetObj) {
-           if (Array.isArray(presetObj)) return presetObj;
-           return Array.isArray(presetObj.regex) ? presetObj.regex
-             : Array.isArray(presetObj.extensions?.regex) ? presetObj.extensions.regex
-             : Array.isArray(presetObj.extensions?.regex_scripts) ? presetObj.extensions.regex_scripts
-             : Array.isArray(presetObj.data?.extensions?.regex_scripts) ? presetObj.data.extensions.regex_scripts
-             : Array.isArray(presetObj.regex_scripts) ? presetObj.regex_scripts
-             : [];
+           const fallbacks = [
+               presetObj.extensions?.regex, presetObj.extensions?.regex_scripts,
+               presetObj.data?.extensions?.regex, presetObj.data?.extensions?.regex_scripts,
+               presetObj.regex, presetObj.regex_scripts, presetObj.scripts
+           ];
+           for (const fb of fallbacks) {
+               if (Array.isArray(fb)) return fb;
+           }
         }
         return [];
       }
@@ -246,10 +251,36 @@
       }
 
       if (scriptType === 2) {
+        let wrote = false;
+
+        const presetObj = root.utils.getSelectedRegexPreset?.(ctx);
+        if (presetObj) {
+           if (Array.isArray(presetObj.extensions?.regex)) presetObj.extensions.regex = nextScripts;
+           else if (Array.isArray(presetObj.extensions?.regex_scripts)) presetObj.extensions.regex_scripts = nextScripts;
+           else if (Array.isArray(presetObj.data?.extensions?.regex)) presetObj.data.extensions.regex = nextScripts;
+           else if (Array.isArray(presetObj.data?.extensions?.regex_scripts)) presetObj.data.extensions.regex_scripts = nextScripts;
+           else if (Array.isArray(presetObj.regex)) presetObj.regex = nextScripts;
+           else if (Array.isArray(presetObj.regex_scripts)) presetObj.regex_scripts = nextScripts;
+           else {
+               if (presetObj.extensions) presetObj.extensions.regex = nextScripts;
+               else presetObj.regex = nextScripts;
+           }
+           wrote = true;
+        }
+
         const presetManager = getRegexPresetManager(ctx);
         const presetName = presetManager?.getSelectedPresetName?.();
-        if (!presetManager || !presetName) return;
-        await presetManager.writePresetExtensionField({ name: presetName, path: 'regex_scripts', value: nextScripts });
+        if (presetManager && presetName && typeof presetManager.writePresetExtensionField === 'function') {
+           const writePaths = ['regex', 'regex_scripts', 'scripts'];
+           for (const p of writePaths) {
+               try { await presetManager.writePresetExtensionField({ name: presetName, path: p, value: nextScripts }); wrote = true; } catch (e) { /* ignore */ }
+           }
+        }
+        
+        if (wrote) {
+            ctx?.saveSettingsDebounced?.();
+        }
+        return;
       }
     }
 

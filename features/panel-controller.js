@@ -154,30 +154,8 @@
       }
       if (scriptType === 2) {
         const presetManager = getRegexPresetManager(ctx);
-        const presetName = presetManager?.getSelectedPresetName?.();
-        
-        let presetScripts = presetManager?.readPresetExtensionField?.({ name: presetName, path: 'regex_scripts' });
-        if (!Array.isArray(presetScripts)) presetScripts = presetManager?.readPresetExtensionField?.({ path: 'regex_scripts' });
-        if (!Array.isArray(presetScripts)) presetScripts = presetManager?.readPresetExtensionField?.({ name: presetName, path: 'regex' });
-        if (!Array.isArray(presetScripts)) presetScripts = presetManager?.readPresetExtensionField?.({ path: 'regex' });
-        
-        if (!Array.isArray(presetScripts) && typeof presetManager?.getPreset === 'function') {
-           const p = presetManager.getPreset(presetName);
-           if (p) presetScripts = p.extensions?.regex_scripts || p.extensions?.regex || p.regex_scripts || p.regex || p.data?.extensions?.regex_scripts;
-        }
-
-        if (Array.isArray(presetScripts)) return presetScripts;
-
-        const presetObj = root.utils.getSelectedRegexPreset?.(ctx);
-        if (presetObj) {
-           return Array.isArray(presetObj.extensions?.regex_scripts) ? presetObj.extensions.regex_scripts
-             : Array.isArray(presetObj.extensions?.regex) ? presetObj.extensions.regex
-             : Array.isArray(presetObj.data?.extensions?.regex_scripts) ? presetObj.data.extensions.regex_scripts
-             : Array.isArray(presetObj.regex_scripts) ? presetObj.regex_scripts
-             : Array.isArray(presetObj.regex) ? presetObj.regex
-             : [];
-        }
-        return [];
+        const presetScripts = presetManager?.readPresetExtensionField?.({ path: 'regex_scripts' });
+        return Array.isArray(presetScripts) ? presetScripts : [];
       }
       return [];
     }
@@ -330,17 +308,10 @@
     async function applyFolderDisabledState(groupId, enabled, items = collectItems()) {
       const ctx = getCtx();
       const currentScripts = getScriptsByCurrentScope(ctx);
-      if (!Array.isArray(currentScripts)) return false;
+      if (!Array.isArray(currentScripts) || currentScripts.length < 1) return false;
 
-      // 找出属于该文件夹的所有 item
-      const validGroupIds = new Set(store.groups.map(g => g.id));
-      const folderItems = items.filter(item => {
-        const assignedGroupId = store.assignments[item.id];
-        const actualGroupId = (assignedGroupId && validGroupIds.has(assignedGroupId)) ? assignedGroupId : UNGROUPED_ID;
-        return actualGroupId === groupId;
-      });
-
-      if (folderItems.length < 1) {
+      const targetItemIds = getFolderItemIds(groupId, items, currentScripts);
+      if (targetItemIds.length < 1) {
         toast(`目前生效 0 条 (共 0 条)`, 'success', `本次${enabled ? '开启' : '关闭'} 0 条`);
         if (store.disabledSnapshots?.[groupId]) {
           delete store.disabledSnapshots[groupId];
@@ -349,82 +320,30 @@
         return false;
       }
 
-      // 建立 item.id -> script 的映射
-      const itemIdToScript = new Map();
-
-      // 第一遍：有 script.id 的走 dom: 匹配
-      for (const script of currentScripts) {
-        if (!script?.id) continue;
-        itemIdToScript.set(`dom:${normalizeName(script.id)}`, script);
-      }
-
-      // 第二遍：尝试按脚本名称后备匹配（针对 item.id 为 fp:/name: 的预设正则）
-      // 先建立 scriptName -> script 和 scriptName -> index 的查找表
-      const scriptByName = new Map();
-      const scriptIndexByName = new Map();
-      for (let i = 0; i < currentScripts.length; i++) {
-        const script = currentScripts[i];
-        if (!script) continue;
-        const sname = normalizeName(script.scriptName || script.name || '');
-        if (sname && !scriptByName.has(sname)) {
-          scriptByName.set(sname, script);
-          scriptIndexByName.set(sname, i);
-        }
-      }
-
-      // 对每个 folderItem，如果 dom: 路径未命中，用 item.name 查脚本
-      for (const folderItem of folderItems) {
-        if (itemIdToScript.has(folderItem.id)) continue;
-        const fname = normalizeName(folderItem.name);
-        if (fname && scriptByName.has(fname)) {
-          itemIdToScript.set(folderItem.id, scriptByName.get(fname));
-        }
-      }
-
-      // 找出文件夹内 itemId 在 itemIdToScript 中有对应 script 的集合
-      const availableFolderItemIds = new Set(folderItems.map(item => item.id).filter(id => itemIdToScript.has(id)));
-
-      if (!store.disabledSnapshots || typeof store.disabledSnapshots !== 'object') {
-        store.disabledSnapshots = {};
-      }
-
-      const existingSnapshot = store.disabledSnapshots[groupId] && typeof store.disabledSnapshots[groupId] === 'object'
-        ? { ...store.disabledSnapshots[groupId] } : {};
+      const availableScriptsByItemId = new Map(
+        currentScripts
+          .filter((script) => script && typeof script === 'object' && normalizeName(script.id))
+          .map((script) => [`dom:${normalizeName(script.id)}`, script])
+      );
+      const availableTargetItemIds = new Set(targetItemIds.filter((itemId) => availableScriptsByItemId.has(itemId)));
+      const existingSnapshotSource = store.disabledSnapshots?.[groupId];
+      const existingSnapshot = existingSnapshotSource && typeof existingSnapshotSource === 'object' ? { ...existingSnapshotSource } : {};
       const nextSnapshot = {};
+
       let snapshotChanged = false;
-
       for (const [itemId, value] of Object.entries(existingSnapshot)) {
-        if (availableFolderItemIds.has(itemId)) nextSnapshot[itemId] = !!value;
+        if (availableTargetItemIds.has(itemId)) nextSnapshot[itemId] = !!value;
         else snapshotChanged = true;
-      }
-
-      // 构建 itemId -> 数组下标 的反向索引
-      const itemIdToIndex = new Map();
-      for (let i = 0; i < currentScripts.length; i++) {
-        const script = currentScripts[i];
-        if (!script) continue;
-        const sid = normalizeName(script.id);
-        if (sid) {
-          itemIdToIndex.set(`dom:${sid}`, i);
-        }
-      }
-      // 对名称路径命中的 folderItem，补充下标映射
-      for (const folderItem of folderItems) {
-        if (itemIdToIndex.has(folderItem.id)) continue;
-        const fname = normalizeName(folderItem.name);
-        if (fname && scriptIndexByName.has(fname)) {
-          itemIdToIndex.set(folderItem.id, scriptIndexByName.get(fname));
-        }
       }
 
       let scriptsChanged = false;
       let changedCount = 0;
-      const nextScripts = currentScripts.slice();
+      const nextScripts = currentScripts.map((script) => {
+        const scriptId = normalizeName(script?.id);
+        if (!scriptId) return script;
 
-      for (const itemId of availableFolderItemIds) {
-        const script = itemIdToScript.get(itemId);
-        const idx = itemIdToIndex.get(itemId);
-        if (!script || idx === undefined) continue;
+        const itemId = `dom:${scriptId}`;
+        if (!availableTargetItemIds.has(itemId)) return script;
 
         if (!enabled) {
           if (!Object.prototype.hasOwnProperty.call(nextSnapshot, itemId)) {
@@ -432,24 +351,25 @@
             snapshotChanged = true;
           }
           if (!script.disabled) {
-            nextScripts[idx] = { ...script, disabled: true };
             scriptsChanged = true;
             changedCount++;
+            return { ...script, disabled: true };
           }
-        } else {
-          if (!Object.prototype.hasOwnProperty.call(nextSnapshot, itemId)) continue;
-          const nextDisabled = !!nextSnapshot[itemId];
-          delete nextSnapshot[itemId];
-          snapshotChanged = true;
-          if (!!script.disabled !== nextDisabled) {
-            nextScripts[idx] = { ...script, disabled: nextDisabled };
-            scriptsChanged = true;
-            changedCount++;
-          }
+          return script;
         }
-      }
 
-      const hadSnapshot = Object.prototype.hasOwnProperty.call(store.disabledSnapshots, groupId);
+        if (!Object.prototype.hasOwnProperty.call(nextSnapshot, itemId)) return script;
+
+        const nextDisabled = !!nextSnapshot[itemId];
+        delete nextSnapshot[itemId];
+        snapshotChanged = true;
+        if (!!script.disabled === nextDisabled) return script;
+        scriptsChanged = true;
+        changedCount++;
+        return { ...script, disabled: nextDisabled };
+      });
+
+      const hadSnapshot = Object.prototype.hasOwnProperty.call(store.disabledSnapshots || {}, groupId);
       if (Object.keys(nextSnapshot).length > 0) {
         store.disabledSnapshots[groupId] = nextSnapshot;
       } else if (hadSnapshot) {
@@ -457,16 +377,14 @@
         snapshotChanged = true;
       }
 
-      // 统计当前文件夹内生效条数
-      let activeCount = 0;
-      for (const itemId of availableFolderItemIds) {
-        const idx = itemIdToIndex.get(itemId);
-        if (idx === undefined) continue;
-        const script = scriptsChanged ? nextScripts[idx] : currentScripts[idx];
-        if (script && !script.disabled) activeCount++;
-      }
+      // 统计文件夹内目前生效条数
+      const activeCount = (scriptsChanged ? nextScripts : currentScripts)
+        .filter((script) => {
+          const sid = normalizeName(script?.id);
+          return sid && availableTargetItemIds.has(`dom:${sid}`) && !script.disabled;
+        }).length;
 
-      const toastMessage = `目前生效 ${activeCount} 条 (共 ${folderItems.length} 条)`;
+      const toastMessage = `目前生效 ${activeCount} 条 (共 ${availableTargetItemIds.size} 条)`;
       const toastTitle = `本次${enabled ? '开启' : '关闭'} ${changedCount} 条`;
 
       if (!scriptsChanged) {

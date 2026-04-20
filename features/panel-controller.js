@@ -332,8 +332,15 @@
       const currentScripts = getScriptsByCurrentScope(ctx);
       if (!Array.isArray(currentScripts)) return false;
 
-      const targetItemIds = getFolderItemIds(groupId, items, currentScripts);
-      if (targetItemIds.length < 1) {
+      // 找出属于该文件夹的所有 item
+      const validGroupIds = new Set(store.groups.map(g => g.id));
+      const folderItems = items.filter(item => {
+        const assignedGroupId = store.assignments[item.id];
+        const actualGroupId = (assignedGroupId && validGroupIds.has(assignedGroupId)) ? assignedGroupId : UNGROUPED_ID;
+        return actualGroupId === groupId;
+      });
+
+      if (folderItems.length < 1) {
         toast(`目前生效 0 条 (共 0 条)`, 'success', `本次${enabled ? '开启' : '关闭'} 0 条`);
         if (store.disabledSnapshots?.[groupId]) {
           delete store.disabledSnapshots[groupId];
@@ -342,55 +349,90 @@
         return false;
       }
 
-      const availableScriptsByItemId = getScriptsByItemId(currentScripts, items);
-      const availableTargetItemIds = new Set(targetItemIds.filter((itemId) => availableScriptsByItemId.has(itemId)));
-      const existingSnapshotSource = store.disabledSnapshots?.[groupId];
-      const existingSnapshot = existingSnapshotSource && typeof existingSnapshotSource === 'object' ? { ...existingSnapshotSource } : {};
-      const nextSnapshot = {};
+      // 建立 item.id -> script 的映射（优先按 dom:scriptId 匹配，其次按下标对齐）
+      const itemIdToScript = new Map();
+      const scriptIdToItemId = new Map();
 
+      // 第一遍：有 script.id 的走 dom: 匹配
+      for (const script of currentScripts) {
+        if (!script?.id) continue;
+        const itemId = `dom:${normalizeName(script.id)}`;
+        scriptIdToItemId.set(normalizeName(script.id), itemId);
+        itemIdToScript.set(itemId, script);
+      }
+
+      // 第二遍：无 script.id 的按 items 下标对齐
+      for (let i = 0; i < currentScripts.length; i++) {
+        const script = currentScripts[i];
+        if (!script || normalizeName(script.id)) continue; // 有 ID 的已处理
+        if (items[i]?.id && !itemIdToScript.has(items[i].id)) {
+          itemIdToScript.set(items[i].id, script);
+        }
+      }
+
+      // 找出文件夹内 itemId 在 itemIdToScript 中有对应 script 的集合
+      const availableFolderItemIds = new Set(folderItems.map(item => item.id).filter(id => itemIdToScript.has(id)));
+
+      if (!store.disabledSnapshots || typeof store.disabledSnapshots !== 'object') {
+        store.disabledSnapshots = {};
+      }
+
+      const existingSnapshot = store.disabledSnapshots[groupId] && typeof store.disabledSnapshots[groupId] === 'object'
+        ? { ...store.disabledSnapshots[groupId] } : {};
+      const nextSnapshot = {};
       let snapshotChanged = false;
+
       for (const [itemId, value] of Object.entries(existingSnapshot)) {
-        if (availableTargetItemIds.has(itemId)) nextSnapshot[itemId] = !!value;
+        if (availableFolderItemIds.has(itemId)) nextSnapshot[itemId] = !!value;
         else snapshotChanged = true;
+      }
+
+      // 构建脚本 itemId -> 数组下标 的反向索引，用于修改 nextScripts
+      const itemIdToIndex = new Map();
+      for (let i = 0; i < currentScripts.length; i++) {
+        const script = currentScripts[i];
+        if (!script) continue;
+        const sid = normalizeName(script.id);
+        if (sid) {
+          itemIdToIndex.set(`dom:${sid}`, i);
+        } else if (items[i]?.id) {
+          itemIdToIndex.set(items[i].id, i);
+        }
       }
 
       let scriptsChanged = false;
       let changedCount = 0;
-      const nextScripts = currentScripts.map((script, index) => {
-        const scriptId = normalizeName(script?.id);
-        let itemId;
-        if (scriptId) {
-          itemId = `dom:${scriptId}`;
-        } else if (items[index]?.id) {
-          itemId = items[index].id;
-        }
+      const nextScripts = currentScripts.slice();
 
-        if (!itemId || !availableTargetItemIds.has(itemId)) return script;
+      for (const itemId of availableFolderItemIds) {
+        const script = itemIdToScript.get(itemId);
+        const idx = itemIdToIndex.get(itemId);
+        if (!script || idx === undefined) continue;
 
         if (!enabled) {
           if (!Object.prototype.hasOwnProperty.call(nextSnapshot, itemId)) {
             nextSnapshot[itemId] = !!script.disabled;
             snapshotChanged = true;
           }
-
-          if (!!script.disabled) return script;
-          scriptsChanged = true;
-          changedCount++;
-          return { ...script, disabled: true };
+          if (!script.disabled) {
+            nextScripts[idx] = { ...script, disabled: true };
+            scriptsChanged = true;
+            changedCount++;
+          }
+        } else {
+          if (!Object.prototype.hasOwnProperty.call(nextSnapshot, itemId)) continue;
+          const nextDisabled = !!nextSnapshot[itemId];
+          delete nextSnapshot[itemId];
+          snapshotChanged = true;
+          if (!!script.disabled !== nextDisabled) {
+            nextScripts[idx] = { ...script, disabled: nextDisabled };
+            scriptsChanged = true;
+            changedCount++;
+          }
         }
+      }
 
-        if (!Object.prototype.hasOwnProperty.call(nextSnapshot, itemId)) return script;
-
-        const nextDisabled = !!nextSnapshot[itemId];
-        delete nextSnapshot[itemId];
-        snapshotChanged = true;
-        if (!!script.disabled === nextDisabled) return script;
-        scriptsChanged = true;
-        changedCount++;
-        return { ...script, disabled: nextDisabled };
-      });
-
-      const hadSnapshot = Object.prototype.hasOwnProperty.call(store.disabledSnapshots || {}, groupId);
+      const hadSnapshot = Object.prototype.hasOwnProperty.call(store.disabledSnapshots, groupId);
       if (Object.keys(nextSnapshot).length > 0) {
         store.disabledSnapshots[groupId] = nextSnapshot;
       } else if (hadSnapshot) {
@@ -398,23 +440,16 @@
         snapshotChanged = true;
       }
 
+      // 统计当前文件夹内生效条数
       let activeCount = 0;
-      const checkScripts = scriptsChanged ? nextScripts : currentScripts;
-      for (let i = 0; i < checkScripts.length; i++) {
-        const script = checkScripts[i];
-        const scriptId = normalizeName(script?.id);
-        let itemId;
-        if (scriptId) {
-          itemId = `dom:${scriptId}`;
-        } else if (items[i]?.id) {
-          itemId = items[i].id;
-        }
-        if (itemId && availableTargetItemIds.has(itemId) && !script.disabled) {
-          activeCount++;
-        }
+      for (const itemId of availableFolderItemIds) {
+        const idx = itemIdToIndex.get(itemId);
+        if (idx === undefined) continue;
+        const script = scriptsChanged ? nextScripts[idx] : currentScripts[idx];
+        if (script && !script.disabled) activeCount++;
       }
 
-      const toastMessage = `目前生效 ${activeCount} 条 (共 ${targetItemIds.length} 条)`;
+      const toastMessage = `目前生效 ${activeCount} 条 (共 ${folderItems.length} 条)`;
       const toastTitle = `本次${enabled ? '开启' : '关闭'} ${changedCount} 条`;
 
       if (!scriptsChanged) {
@@ -428,6 +463,7 @@
       toast(toastMessage, 'success', toastTitle);
       return true;
     }
+
 
     async function setFolderEnabled(groupId, enabled) {
       const items = collectItems();

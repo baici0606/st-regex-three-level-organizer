@@ -157,8 +157,10 @@
   flex-shrink: 0;
 }
 
-.st-rmg-group-header[data-group-id="__ungrouped__"] .st-rmg-folder-controls {
-  justify-content: flex-end;
+.st-rmg-group-header[data-group-id="__ungrouped__"] .st-rmg-folder-handle {
+  visibility: hidden;
+  pointer-events: none;
+  cursor: default;
 }
 
 .st-rmg-folder-actions {
@@ -355,11 +357,6 @@
   .st-rmg-folder-controls {
     width: auto;
     min-width: 86px;
-    justify-content: flex-end;
-  }
-
-  .st-rmg-group-header[data-group-id="__ungrouped__"] .st-rmg-folder-controls {
-    width: auto;
     justify-content: flex-end;
   }
 

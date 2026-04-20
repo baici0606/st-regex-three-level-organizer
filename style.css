@@ -325,9 +325,9 @@
   margin: 0;
   padding: 0;
   border: 0;
-  opacity: 0;
+  opacity: 0.001;
   overflow: hidden;
-  pointer-events: none;
+  pointer-events: auto;
 }
 
 .st-rmg-group-arrow {

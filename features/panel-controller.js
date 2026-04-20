@@ -217,18 +217,8 @@
         if (wrotePreset) {
           return;
         }
-
-        const presets = ctx?.extensionSettings?.regex_presets;
-        if (!Array.isArray(presets) || presets.length < 1) {
-          toast('当前没有可用的预设，无法保存预设正则', 'warning');
-          return;
-        }
-
-        const selectedPreset = presets.find((preset) => preset?.isSelected) || presets[0];
-        if (selectedPreset) {
-          selectedPreset.regex_scripts = nextScripts;
-          ctx?.saveSettingsDebounced?.();
-        }
+        toast('预设正则保存失败：未找到可用的 preset manager 接口', 'error');
+        return;
       }
     }
 
@@ -820,23 +810,56 @@
       return undefined;
     }
 
-    function getTargetGroupIdFromPointer(listEl, event) {
-      if (typeof document.elementsFromPoint !== 'function') return undefined;
-      const source = event?.originalEvent || event;
-      const clientX = Number(source?.clientX ?? event?.clientX);
-      const clientY = Number(source?.clientY ?? event?.clientY);
-      if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return undefined;
+    function getGroupIdFromVerticalPosition(listEl, clientY) {
+      if (!(listEl instanceof HTMLElement) || !Number.isFinite(clientY)) return undefined;
 
-      const hoveredElements = document.elementsFromPoint(clientX, clientY);
-      for (const hoveredElement of hoveredElements) {
-        if (!(hoveredElement instanceof HTMLElement)) continue;
-        if (hoveredElement.classList.contains('ui-sortable-helper') || hoveredElement.classList.contains('ui-sortable-placeholder')) continue;
-        const listChild = hoveredElement.closest('.st-rmg-group-header, .st-rmg-sort-anchor, .regex-script-label');
-        const groupId = getGroupIdFromListChild(listEl, listChild);
+      const listChildren = Array.from(listEl.children).filter((child) => child instanceof HTMLElement);
+      for (const child of listChildren) {
+        const rect = child.getBoundingClientRect();
+        if (clientY < rect.top || clientY > rect.bottom) continue;
+        const groupId = getGroupIdFromListChild(listEl, child);
         if (groupId !== undefined) return groupId;
       }
 
-      return undefined;
+      for (let index = 0; index < listChildren.length - 1; index += 1) {
+        const current = listChildren[index];
+        const next = listChildren[index + 1];
+        const currentRect = current.getBoundingClientRect();
+        const nextRect = next.getBoundingClientRect();
+        if (clientY > currentRect.bottom && clientY < nextRect.top) {
+          const nextGroupId = getGroupIdFromListChild(listEl, next);
+          if (nextGroupId !== undefined) return nextGroupId;
+          const currentGroupId = getGroupIdFromListChild(listEl, current);
+          if (currentGroupId !== undefined) return currentGroupId;
+        }
+      }
+
+      const lastChild = listChildren[listChildren.length - 1];
+      if (lastChild) {
+        return getGroupIdFromListChild(listEl, lastChild);
+      }
+
+      return UNGROUPED_ID;
+    }
+
+    function getTargetGroupIdFromPointer(listEl, event) {
+      const source = event?.originalEvent || event;
+      const clientX = Number(source?.clientX ?? event?.clientX);
+      const clientY = Number(source?.clientY ?? event?.clientY);
+      if (!Number.isFinite(clientY)) return undefined;
+
+      if (Number.isFinite(clientX) && typeof document.elementsFromPoint === 'function') {
+        const hoveredElements = document.elementsFromPoint(clientX, clientY);
+        for (const hoveredElement of hoveredElements) {
+          if (!(hoveredElement instanceof HTMLElement)) continue;
+          if (hoveredElement.classList.contains('ui-sortable-helper') || hoveredElement.classList.contains('ui-sortable-placeholder')) continue;
+          const listChild = hoveredElement.closest('.st-rmg-group-header, .st-rmg-sort-anchor, .regex-script-label');
+          const groupId = getGroupIdFromListChild(listEl, listChild);
+          if (groupId !== undefined) return groupId;
+        }
+      }
+
+      return getGroupIdFromVerticalPosition(listEl, clientY);
     }
 
     function movePlaceholderIntoTargetGroup(listEl, event, ui) {

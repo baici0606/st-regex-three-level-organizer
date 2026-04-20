@@ -333,8 +333,6 @@
 
       // === DOM-based fallback：脚本数据不可读时（如预设正则），直接操作 checkbox ===
       if (availableTargetItemIds.size < 1) {
-        const itemById = new Map(items.map(item => [item.id, item]));
-
         if (!store.disabledSnapshots || typeof store.disabledSnapshots !== 'object') {
           store.disabledSnapshots = {};
         }
@@ -345,15 +343,16 @@
         let changedCount = 0;
         let snapshotChanged = false;
 
+        // 第一步：遍历当前 DOM 状态，收集 checkbox 并操作
         for (const itemId of targetItemIds) {
-          const item = itemById.get(itemId);
+          const item = items.find(i => i.id === itemId);
           if (!item?.el) continue;
           const checkbox = item.el.querySelector('input[type=checkbox]');
           if (!checkbox) continue;
           const currentlyActive = checkbox.checked;
 
           if (!enabled) {
-            // 关闭：保存当前状态到快照，然后禁用
+            // 关闭文件夹：保存当前状态快照，然后禁用（uncheck）
             if (!Object.prototype.hasOwnProperty.call(existingSnapshot, itemId)) {
               nextSnapshot[itemId] = currentlyActive;
               snapshotChanged = true;
@@ -365,7 +364,7 @@
               changedCount++;
             }
           } else {
-            // 开启：从快照恢复状态
+            // 开启文件夹：从快照恢复状态
             if (!Object.prototype.hasOwnProperty.call(existingSnapshot, itemId)) continue;
             const shouldBeActive = !!existingSnapshot[itemId];
             snapshotChanged = true;
@@ -376,6 +375,7 @@
           }
         }
 
+        // 保存快照
         const hadSnapshot = Object.prototype.hasOwnProperty.call(store.disabledSnapshots, groupId);
         if (!enabled && Object.keys(nextSnapshot).length > 0) {
           store.disabledSnapshots[groupId] = nextSnapshot;
@@ -385,13 +385,20 @@
         }
         if (snapshotChanged) saveStore();
 
-        // 等待 ST 事件处理器更新状态后再统计
-        if (changedCount > 0) await new Promise((resolve) => window.setTimeout(resolve, 80));
+        // 第二步：等待 ST 的事件处理器完成（包括可能的异步保存和 DOM 更新）
+        if (changedCount > 0) {
+          await new Promise((resolve) => window.setTimeout(resolve, 300));
+        }
 
-        const activeCount = targetItemIds.filter(itemId => {
-          const item = itemById.get(itemId);
-          return item?.el?.querySelector('input[type=checkbox]')?.checked;
-        }).length;
+        // 第三步：重新从 DOM 取新鲜 item 状态来统计（避免旧引用读到脏数据）
+        const freshItems = collectItems();
+        const freshItemById = new Map(freshItems.map(item => [item.id, item]));
+        const activeCount = targetItemIds.reduce((count, itemId) => {
+          const freshItem = freshItemById.get(itemId);
+          const el = freshItem?.el ?? items.find(i => i.id === itemId)?.el;
+          const cb = el?.querySelector('input[type=checkbox]');
+          return count + (cb?.checked === true ? 1 : 0);
+        }, 0);
 
         toast(`目前生效 ${activeCount} 条 (共 ${targetItemIds.length} 条)`, 'success', `本次${enabled ? '开启' : '关闭'} ${changedCount} 条`);
         if (changedCount > 0) {
@@ -786,12 +793,16 @@
         const testPm = getRegexPresetManager(ctx);
         const testName = testPm?.getSelectedPresetName?.();
         if (!testPm || !testName) {
-          toast('当前 ST 版本的预设正则不支持通过此插件导入脚本，请直接在 ST 的预设正则面板手动添加', 'warning');
+          toast('当前 ST 版本的预设正则不支持通过此插件导入脚本\n请直接在 ST 的预设正则面板手动添加后再分组', 'warning');
           return;
         }
       }
 
-
+      // 局部正则：如果没有选中角色，导入会静默失败
+      if (getScriptType() === 1 && (ctx?.characterId === undefined || ctx?.characterId === null)) {
+        toast('请先在 ST 中选中一个角色，再向局部正则导入文件夹', 'warning');
+        return;
+      }
       let nextGroupId = uid('group');
       while (getGroupById(nextGroupId)) {
         nextGroupId = uid('group');

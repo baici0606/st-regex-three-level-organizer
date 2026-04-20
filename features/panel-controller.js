@@ -304,6 +304,7 @@
 
       const targetItemIds = getFolderItemIds(groupId, items, currentScripts);
       if (targetItemIds.length < 1) {
+        toast(`${enabled ? '已启用' : '已关闭'} 0 条${FOLDER_LABEL}内正则`, 'success');
         if (store.disabledSnapshots?.[groupId]) {
           delete store.disabledSnapshots[groupId];
           return true;
@@ -360,12 +361,15 @@
         snapshotChanged = true;
       }
 
-      if (!scriptsChanged) return snapshotChanged;
+      if (!scriptsChanged) {
+        toast(`${enabled ? '已启用' : '已关闭'} ${targetItemIds.length} 条${FOLDER_LABEL}内正则`, 'success');
+        return snapshotChanged;
+      }
 
       await saveScriptsForCurrentScope(nextScripts, ctx);
       await reloadRegexUi(ctx);
       refreshAllPanels();
-      toast(`${enabled ? '已启用' : '已关闭'}${targetItemIds.length} 条${FOLDER_LABEL}内正则`, 'success');
+      toast(`${enabled ? '已启用' : '已关闭'} ${targetItemIds.length} 条${FOLDER_LABEL}内正则`, 'success');
       return true;
     }
 
@@ -1622,6 +1626,8 @@
         if (!handleEl) return;
         const headerEl = handleEl.closest('.st-rmg-group-header');
         if (headerEl && headerEl.dataset.groupId === UNGROUPED_ID) {
+          e.preventDefault();
+          e.stopPropagation();
           toast('未分组无法拖拽', 'warning');
         }
       });

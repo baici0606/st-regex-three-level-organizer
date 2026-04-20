@@ -163,7 +163,7 @@
 
 .st-rmg-group-header[data-group-id="__ungrouped__"] .st-rmg-folder-handle {
   cursor: default;
-  opacity: 0.3;
+  pointer-events: none;
 }
 
 .st-rmg-folder-actions {

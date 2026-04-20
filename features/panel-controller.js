@@ -1429,7 +1429,10 @@
     }
 
     async function addGroup() {
-      const name = validateGroupName(await openPrompt(`输入${FOLDER_LABEL}名称，例如 A文件夹 / B文件夹`));
+      const promptResult = await openPrompt(`输入${FOLDER_LABEL}名称，例如 A文件夹 / B文件夹`);
+      if (promptResult === null) return;
+
+      const name = validateGroupName(promptResult);
       if (!name) return;
 
       store.groups.push({
@@ -1445,7 +1448,10 @@
       const group = store.groups.find((entry) => entry.id === groupId);
       if (!group) return;
 
-      const nextName = validateGroupName(await openPrompt(`输入新的${FOLDER_LABEL}名称`, group.name), group.id);
+      const promptResult = await openPrompt(`输入新的${FOLDER_LABEL}名称`, group.name);
+      if (promptResult === null) return;
+
+      const nextName = validateGroupName(promptResult, group.id);
       if (!nextName) return;
 
       group.name = nextName;

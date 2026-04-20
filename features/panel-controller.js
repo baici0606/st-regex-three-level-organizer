@@ -1023,7 +1023,7 @@
           header.classList.add('st-rmg-folder-disabled');
         }
         header.innerHTML = `
-          <span class="st-rmg-folder-handle" draggable="${groupId !== UNGROUPED_ID ? 'true' : 'false'}" ${groupId !== UNGROUPED_ID ? 'title="拖动排序" aria-label="拖动排序"' : 'aria-hidden="true"'}>&#8801;</span>
+          <span class="st-rmg-folder-handle" draggable="true" ${groupId !== UNGROUPED_ID ? 'title="拖动排序" aria-label="拖动排序"' : 'title="不可拖拽" aria-label="不可拖拽"'}>&#8801;</span>
           <span class="st-rmg-group-labels">
             <span class="st-rmg-group-name">${escapeHtml(title)}</span>
             <span class="st-rmg-group-count">(${count})</span>
@@ -1621,17 +1621,6 @@
       if (listEl.dataset.stRmgBound === '1') return;
       listEl.dataset.stRmgBound = '1';
 
-      listEl.addEventListener('mousedown', (e) => {
-        const handleEl = e.target?.closest?.('.st-rmg-folder-handle');
-        if (!handleEl) return;
-        const headerEl = handleEl.closest('.st-rmg-group-header');
-        if (headerEl && headerEl.dataset.groupId === UNGROUPED_ID) {
-          e.preventDefault();
-          e.stopPropagation();
-          toast('未分组无法拖拽', 'warning');
-        }
-      });
-
       listEl.addEventListener('click', (e) => {
         const exportBtn = e.target?.closest?.('[data-folder-export]');
         if (exportBtn) {
@@ -1686,7 +1675,12 @@
         if (!handleEl) return;
 
         const headerEl = handleEl.closest('.st-rmg-group-header.st-rmg-folder-draggable');
-        if (!headerEl) return;
+        if (!headerEl) {
+          e.preventDefault();
+          e.stopPropagation();
+          toast('未分组无法拖拽', 'warning');
+          return;
+        }
 
         draggingFolderId = String(headerEl.dataset.groupId || '');
         folderDropTargetId = '';

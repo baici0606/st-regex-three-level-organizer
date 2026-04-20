@@ -315,9 +315,8 @@
       if (!Array.isArray(currentScripts)) return false;
 
       const targetItemIds = getFolderItemIds(groupId, items, currentScripts);
-      let targetActiveCount = 0;
       if (targetItemIds.length < 1) {
-        toast(`本次${enabled ? '开启' : '关闭'} 0 条　|　目前生效 0 条 (共 0 条)`, 'success');
+        toast(`目前生效 0 条 (共 0 条)`, 'success', `本次${enabled ? '开启' : '关闭'} 0 条`);
         if (store.disabledSnapshots?.[groupId]) {
           delete store.disabledSnapshots[groupId];
           return true;
@@ -392,17 +391,18 @@
         i++;
       }
 
-      const toastMessage = `本次${enabled ? '开启' : '关闭'} ${changedCount} 条　|　目前生效 ${activeCount} 条 (共 ${targetItemIds.length} 条)`;
+      const toastMessage = `目前生效 ${activeCount} 条 (共 ${targetItemIds.length} 条)`;
+      const toastTitle = `本次${enabled ? '开启' : '关闭'} ${changedCount} 条`;
 
       if (!scriptsChanged) {
-        toast(toastMessage, 'success');
+        toast(toastMessage, 'success', toastTitle);
         return snapshotChanged;
       }
 
       await saveScriptsForCurrentScope(nextScripts, ctx);
       await reloadRegexUi(ctx);
       refreshAllPanels();
-      toast(toastMessage, 'success');
+      toast(toastMessage, 'success', toastTitle);
       return true;
     }
 

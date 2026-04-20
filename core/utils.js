@@ -72,17 +72,21 @@
     }
   }
 
-  function toast(message, level = 'info') {
+  function toast(message, level = 'info', title = undefined) {
     try {
       const fn = window.toastr?.[level] || window.toastr?.info;
       if (fn) {
-        fn(message);
+        if (title !== undefined) {
+          fn(message, title);
+        } else {
+          fn(message);
+        }
         return;
       }
     } catch {
       // ignore
     }
-    log(message);
+    log(title ? `${title} - ${message}` : message);
   }
 
   function normalizeName(value) {

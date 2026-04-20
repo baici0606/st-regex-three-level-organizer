@@ -300,11 +300,11 @@
     async function applyFolderDisabledState(groupId, enabled, items = collectItems()) {
       const ctx = getCtx();
       const currentScripts = getScriptsByCurrentScope(ctx);
-      if (!Array.isArray(currentScripts) || currentScripts.length < 1) return false;
+      if (!Array.isArray(currentScripts)) return false;
 
       const targetItemIds = getFolderItemIds(groupId, items, currentScripts);
       if (targetItemIds.length < 1) {
-        toast(`${enabled ? '已启用' : '已关闭'} 0 条${FOLDER_LABEL}内正则`, 'success');
+        toast(`该${FOLDER_LABEL}内为空，已${enabled ? '开启' : '关闭'} 0 条正则`, 'success');
         if (store.disabledSnapshots?.[groupId]) {
           delete store.disabledSnapshots[groupId];
           return true;
@@ -325,6 +325,7 @@
       }
 
       let scriptsChanged = false;
+      let changedCount = 0;
       const nextScripts = currentScripts.map((script) => {
         const scriptId = normalizeName(script?.id);
         if (!scriptId) return script;
@@ -340,6 +341,7 @@
 
           if (!!script.disabled) return script;
           scriptsChanged = true;
+          changedCount++;
           return { ...script, disabled: true };
         }
 
@@ -350,6 +352,7 @@
         snapshotChanged = true;
         if (!!script.disabled === nextDisabled) return script;
         scriptsChanged = true;
+        changedCount++;
         return { ...script, disabled: nextDisabled };
       });
 
@@ -361,15 +364,27 @@
         snapshotChanged = true;
       }
 
+      let activeCount = 0;
+      for (const script of (scriptsChanged ? nextScripts : currentScripts)) {
+        const scriptId = normalizeName(script?.id);
+        if (!scriptId) continue;
+        const itemId = `dom:${scriptId}`;
+        if (availableTargetItemIds.has(itemId) && !script.disabled) {
+          activeCount++;
+        }
+      }
+
+      const toastMessage = `本次${enabled ? '开启' : '关闭'} ${changedCount} 条正则 (该文件夹共 ${targetItemIds.length} 条 / 当前已生效 ${activeCount} 条)`;
+
       if (!scriptsChanged) {
-        toast(`${enabled ? '已启用' : '已关闭'} ${targetItemIds.length} 条${FOLDER_LABEL}内正则`, 'success');
+        toast(toastMessage, 'success');
         return snapshotChanged;
       }
 
       await saveScriptsForCurrentScope(nextScripts, ctx);
       await reloadRegexUi(ctx);
       refreshAllPanels();
-      toast(`${enabled ? '已启用' : '已关闭'} ${targetItemIds.length} 条${FOLDER_LABEL}内正则`, 'success');
+      toast(toastMessage, 'success');
       return true;
     }
 

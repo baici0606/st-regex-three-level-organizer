@@ -83,6 +83,7 @@
     let selectedGroupId = UNGROUPED_ID;
     let pendingViewportRestore = null;
     let pendingImportedAssignments = [];
+    let pendingImportedBaseline = null;
     let panelCollapsed = !!loadJson(PANEL_COLLAPSED_KEY, false);
 
     function pauseListObserver() {
@@ -133,8 +134,14 @@
       return store.groups.find((group) => group.id === groupId) || null;
     }
 
-    function getFolderState(groupId, items = collectItems()) {
-      return store.disabledFolders?.[groupId] ? STATE_DISABLED : STATE_ENABLED;
+    function getFolderState(groupId, items = collectItems(), currentScripts = getScriptsByCurrentScope()) {
+      if (!store.disabledFolders?.[groupId]) return STATE_ENABLED;
+
+      const validGroup = groupId === UNGROUPED_ID || store.groups.some((group) => group.id === groupId);
+      if (!validGroup) return STATE_ENABLED;
+
+      const targetItemIds = getFolderItemIds(groupId, items, currentScripts);
+      return targetItemIds.length > 0 ? STATE_DISABLED : STATE_ENABLED;
     }
 
     function getScriptType() {
@@ -364,11 +371,7 @@
         return false;
       }
 
-      const availableScriptsByItemId = new Map(
-        currentScripts
-          .filter((script) => script && typeof script === 'object' && normalizeName(script.id))
-          .map((script) => [`dom:${normalizeName(script.id)}`, script])
-      );
+      const availableScriptsByItemId = getScriptsByItemId(currentScripts, items);
       const availableTargetItemIds = new Set(targetItemIds.filter((itemId) => availableScriptsByItemId.has(itemId)));
 
       // === DOM-based fallback：脚本数据不可读时（如预设正则），直接操作 checkbox ===
@@ -596,6 +599,103 @@
       return `${keySegment(groupName, 'regex-folder')}${EXPORT_FILE_EXTENSION}`;
     }
 
+    function ensurePresetImportTarget(ctx = getCtx()) {
+      if (getScriptType() !== 2) return false;
+
+      const presetManager = getRegexPresetManager(ctx);
+      const presetName = presetManager?.getSelectedPresetName?.();
+      if (presetName) return false;
+
+      if (!ctx?.extensionSettings || typeof ctx.extensionSettings !== 'object') return false;
+
+      const presets = Array.isArray(ctx.extensionSettings.regex_presets) ? ctx.extensionSettings.regex_presets : [];
+      if (presets.length < 1) {
+        ctx.extensionSettings.regex_presets = [{ name: 'Default', isSelected: true, regex_scripts: [] }];
+        return true;
+      }
+
+      let selectedFound = false;
+      for (const preset of presets) {
+        if (preset?.isSelected) {
+          selectedFound = true;
+          break;
+        }
+      }
+      if (selectedFound) return false;
+
+      for (let index = 0; index < presets.length; index += 1) {
+        if (!presets[index] || typeof presets[index] !== 'object') continue;
+        presets[index].isSelected = index === 0;
+      }
+      return true;
+    }
+
+    function getImportedScriptMatchLabels(script) {
+      return Array.from(new Set(
+        [
+          script?.scriptName,
+          script?.script_name,
+          script?.name,
+          script?.label,
+          script?.title,
+          script?.findRegex,
+          script?.find_regex
+        ]
+          .map((value) => normalizeName(value))
+          .filter(Boolean)
+      )).slice(0, 6);
+    }
+
+    function captureImportBaseline(items = collectItems()) {
+      const nameCounts = {};
+      const itemIds = [];
+      const keyCandidates = [];
+
+      for (const item of items) {
+        itemIds.push(item.id);
+        if (item.keyCandidate) keyCandidates.push(item.keyCandidate);
+
+        const itemName = normalizeName(item.name);
+        if (itemName) {
+          nameCounts[itemName] = (nameCounts[itemName] || 0) + 1;
+        }
+      }
+
+      return {
+        itemIds,
+        keyCandidates,
+        nameCounts,
+        itemCount: items.length
+      };
+    }
+
+    function getItemNameOccurrences(items) {
+      const counts = new Map();
+      const occurrences = new Map();
+
+      for (const item of items) {
+        const itemName = normalizeName(item.name);
+        if (!itemName) continue;
+
+        const nextCount = (counts.get(itemName) || 0) + 1;
+        counts.set(itemName, nextCount);
+        occurrences.set(item.id, nextCount);
+      }
+
+      return occurrences;
+    }
+
+    function isLikelyImportedItem(item, baseline, baselineItemIds, baselineKeyCandidates, nameOccurrences) {
+      if (!baseline) return true;
+      if (!baselineItemIds.has(item.id)) return true;
+      if (item.keyCandidate && !baselineKeyCandidates.has(item.keyCandidate)) return true;
+
+      const itemName = normalizeName(item.name);
+      const currentOccurrence = nameOccurrences.get(item.id) || 0;
+      const previousCount = Number(baseline.nameCounts?.[itemName] || 0);
+      return !!itemName && currentOccurrence > previousCount;
+    }
+
     function parseImportBundle(rawText) {
       let parsed = null;
       try {
@@ -743,14 +843,31 @@
       store.groups = orderedGroups.map((group, index) => ({ ...group, order: index + 1 }));
     }
 
-    function queueImportedAssignments(importedEntries, groupId) {
-      if (!Array.isArray(importedEntries) || importedEntries.length < 1) return;
+    function queueImportedAssignments(importedEntries, groupId, baseline = captureImportBaseline()) {
+      if (!Array.isArray(importedEntries) || importedEntries.length < 1) {
+        pendingImportedAssignments = [];
+        pendingImportedBaseline = null;
+        return;
+      }
 
-      pendingImportedAssignments = importedEntries.map((entry) => ({
+      pendingImportedBaseline = baseline && typeof baseline === 'object'
+        ? {
+            itemIds: Array.isArray(baseline.itemIds) ? baseline.itemIds.slice() : [],
+            keyCandidates: Array.isArray(baseline.keyCandidates) ? baseline.keyCandidates.slice() : [],
+            nameCounts: baseline.nameCounts && typeof baseline.nameCounts === 'object' ? { ...baseline.nameCounts } : {},
+            itemCount: Number.isFinite(Number(baseline.itemCount)) ? Number(baseline.itemCount) : 0
+          }
+        : null;
+
+      pendingImportedAssignments = importedEntries.map((entry, importIndex) => ({
         groupId,
         scriptId: normalizeName(entry?.script?.id),
+        originalId: normalizeName(entry?.originalId),
+        matchLabels: Array.isArray(entry?.matchLabels) ? entry.matchLabels.slice(0, 6) : [],
+        importIndex,
+        preferredItemIndex: (pendingImportedBaseline?.itemCount || 0) + importIndex,
         tempAssignmentKey: `dom:${entry?.script?.id || ''}`
-      })).filter((entry) => entry.scriptId);
+      })).filter((entry) => entry.scriptId || entry.originalId || entry.matchLabels.length > 0);
     }
 
     function queuePostImportRenderRetries(attempt = 1, maxAttempts = 4) {
@@ -773,41 +890,95 @@
     }
 
     function alignImportedAssignments(items = collectItems()) {
-      if (!Array.isArray(pendingImportedAssignments) || pendingImportedAssignments.length < 1) return false;
+      if (!Array.isArray(pendingImportedAssignments) || pendingImportedAssignments.length < 1) {
+        pendingImportedBaseline = null;
+        return false;
+      }
 
-      const pendingEntries = pendingImportedAssignments.map((entry) => ({ ...entry }));
+      const baseline = pendingImportedBaseline && typeof pendingImportedBaseline === 'object' ? pendingImportedBaseline : null;
+      const baselineItemIds = new Set(Array.isArray(baseline?.itemIds) ? baseline.itemIds : []);
+      const baselineKeyCandidates = new Set(Array.isArray(baseline?.keyCandidates) ? baseline.keyCandidates : []);
+      const nameOccurrences = getItemNameOccurrences(items);
+      const baselineItemCount = Number.isFinite(Number(baseline?.itemCount)) ? Number(baseline.itemCount) : 0;
+      const pendingEntries = pendingImportedAssignments.map((entry) => ({
+        ...entry,
+        matchLabels: Array.isArray(entry.matchLabels) ? entry.matchLabels.slice() : []
+      }));
+      const remainingEntries = [];
       let changed = false;
       const usedItemIds = new Set();
 
-      for (const item of items) {
-        if (usedItemIds.has(item.id)) continue;
-        const itemKey = normalizeName(item.keyCandidate);
-        const matchedIndex = pendingEntries.findIndex((entry) => !!entry.scriptId && !!itemKey && itemKey === entry.scriptId);
-        if (matchedIndex < 0) continue;
+      function findImportedItemMatch(entry) {
+        const normalizedScriptId = normalizeName(entry.scriptId);
+        const normalizedOriginalId = normalizeName(entry.originalId);
+        const labelSet = new Set(
+          (Array.isArray(entry.matchLabels) ? entry.matchLabels : [])
+            .map((label) => normalizeName(label))
+            .filter(Boolean)
+        );
 
-        const [matchedEntry] = pendingEntries.splice(matchedIndex, 1);
-        const tempAssignmentKey = matchedEntry.tempAssignmentKey;
-        const groupId = matchedEntry.groupId;
-        usedItemIds.add(item.id);
+        const exactMatch = items.find((item) => {
+          if (usedItemIds.has(item.id)) return false;
+          if (item.id === entry.tempAssignmentKey) return true;
+          if (item.keyCandidate && normalizedScriptId && item.keyCandidate === normalizedScriptId) return true;
+          if (item.keyCandidate && normalizedOriginalId && item.keyCandidate === normalizedOriginalId) return true;
+          return false;
+        });
+        if (exactMatch) return exactMatch;
 
-        if (store.assignments[tempAssignmentKey] !== undefined && tempAssignmentKey !== item.id) {
+        const likelyNameMatch = items.find((item) => {
+          if (usedItemIds.has(item.id)) return false;
+
+          const itemName = normalizeName(item.name);
+          if (!itemName || !labelSet.has(itemName)) return false;
+
+          return isLikelyImportedItem(item, baseline, baselineItemIds, baselineKeyCandidates, nameOccurrences);
+        });
+        if (likelyNameMatch) return likelyNameMatch;
+
+        const orderedFallback = items.find((item) => {
+          if (usedItemIds.has(item.id)) return false;
+          if (item.index < Math.max(baselineItemCount, Number(entry.preferredItemIndex || 0))) return false;
+          return isLikelyImportedItem(item, baseline, baselineItemIds, baselineKeyCandidates, nameOccurrences);
+        });
+        if (orderedFallback) return orderedFallback;
+
+        return items.find((item) => {
+          if (usedItemIds.has(item.id)) return false;
+          return isLikelyImportedItem(item, baseline, baselineItemIds, baselineKeyCandidates, nameOccurrences);
+        }) || null;
+      }
+
+      for (const entry of pendingEntries) {
+        const matchedItem = findImportedItemMatch(entry);
+        if (!matchedItem) {
+          remainingEntries.push(entry);
+          continue;
+        }
+
+        const tempAssignmentKey = entry.tempAssignmentKey;
+        const groupId = entry.groupId;
+        usedItemIds.add(matchedItem.id);
+
+        if (store.assignments[tempAssignmentKey] !== undefined && tempAssignmentKey !== matchedItem.id) {
           delete store.assignments[tempAssignmentKey];
           changed = true;
         }
 
-        if (store.assignments[item.id] !== groupId) {
-          store.assignments[item.id] = groupId;
+        if (store.assignments[matchedItem.id] !== groupId) {
+          store.assignments[matchedItem.id] = groupId;
           changed = true;
         }
 
         if (store.disabledSnapshots?.[groupId] && Object.prototype.hasOwnProperty.call(store.disabledSnapshots[groupId], tempAssignmentKey)) {
-          store.disabledSnapshots[groupId][item.id] = store.disabledSnapshots[groupId][tempAssignmentKey];
+          store.disabledSnapshots[groupId][matchedItem.id] = store.disabledSnapshots[groupId][tempAssignmentKey];
           delete store.disabledSnapshots[groupId][tempAssignmentKey];
           changed = true;
         }
       }
 
-      pendingImportedAssignments = pendingEntries;
+      pendingImportedAssignments = remainingEntries;
+      if (remainingEntries.length < 1) pendingImportedBaseline = null;
       return changed;
     }
 
@@ -824,18 +995,19 @@
       }
 
       const ctx = getCtx();
-      const currentScripts = getScriptsByCurrentScope(ctx);
+
+      if (getScriptType() === 2) {
+        const presetChanged = ensurePresetImportTarget(ctx);
+        if (presetChanged) {
+          ctx?.saveSettingsDebounced?.();
+          await new Promise((resolve) => window.setTimeout(resolve, 80));
+        }
+      }
+
+      let currentScripts = getScriptsByCurrentScope(ctx);
       if (!Array.isArray(currentScripts)) {
         toast('当前范围的正则列表不可用，导入失败', 'error');
         return;
-      }
-
-      // 预设正则：如果是 ST 1.17 等旧版本且没有可用的预设列表，自动创建一个初始列表以供导入
-      if (getScriptType() === 2) {
-        const presets = ctx?.extensionSettings?.regex_presets;
-        if (!presets || (Array.isArray(presets) && presets.length === 0)) {
-          ctx.extensionSettings.regex_presets = [{ name: 'Default', isSelected: true, regex_scripts: [] }];
-        }
       }
 
       // 局部正则：如果没有选中角色，导入会静默失败
@@ -843,6 +1015,9 @@
         toast('请先在 ST 中选中一个角色，然后再向局部正则导入文件夹', 'warning');
         return;
       }
+
+      const importBaseline = captureImportBaseline();
+
       let nextGroupId = uid('group');
       while (getGroupById(nextGroupId)) {
         nextGroupId = uid('group');
@@ -871,6 +1046,7 @@
         importedEntries.push({
           originalId,
           originalDisabled,
+          matchLabels: getImportedScriptMatchLabels(clonedScript),
           script: clonedScript
         });
       }
@@ -914,7 +1090,7 @@
         store.assignments[`dom:${entry.script.id}`] = nextGroupId;
       }
 
-      queueImportedAssignments(importedEntries, nextGroupId);
+      queueImportedAssignments(importedEntries, nextGroupId, importBaseline);
       pendingViewportRestore = captureViewportState(getHeaderEl());
       saveStore();
       await saveScriptsForCurrentScope(currentScripts.concat(importedEntries.map((entry) => entry.script)), ctx);
@@ -975,12 +1151,14 @@
     }
 
     function cleanupAssignments(items) {
+      const currentScripts = getScriptsByCurrentScope();
       const validItemIds = new Set(items.map((item) => item.id));
       const validGroupIds = new Set(store.groups.map((group) => group.id));
       const shouldPruneMissingItems = scope === 'global' && items.length > 0;
       const canPruneSnapshotItems = items.length > 0;
       const protectedPendingKeys = new Set((pendingImportedAssignments || []).map((entry) => entry.tempAssignmentKey).filter(Boolean));
-      const currentScriptsByItemId = getScriptsByItemId();
+      const pendingImportGroupIds = new Set((pendingImportedAssignments || []).map((entry) => entry.groupId).filter(Boolean));
+      const currentScriptsByItemId = getScriptsByItemId(currentScripts, items);
       let changed = false;
 
       for (const [itemId, groupId] of Object.entries(store.assignments)) {
@@ -1003,6 +1181,12 @@
 
       for (const groupId of Object.keys(store.disabledFolders || {})) {
         if (groupId !== UNGROUPED_ID && !validGroupIds.has(groupId)) {
+          delete store.disabledFolders[groupId];
+          changed = true;
+          continue;
+        }
+
+        if (!pendingImportGroupIds.has(groupId) && getFolderItemIds(groupId, items, currentScripts).length < 1) {
           delete store.disabledFolders[groupId];
           changed = true;
         }
@@ -1032,6 +1216,12 @@
         }
 
         if (Object.keys(snapshot).length < 1) {
+          delete store.disabledSnapshots[groupId];
+          changed = true;
+          continue;
+        }
+
+        if (!pendingImportGroupIds.has(groupId) && getFolderItemIds(groupId, items, currentScripts).length < 1) {
           delete store.disabledSnapshots[groupId];
           changed = true;
         }
@@ -1114,17 +1304,19 @@
       if (!containerEl) return;
       containerEl.innerHTML = `
         <div class="st-rmg-group-actions-container">
-          <div class="st-rmg-group-actions">
+          <div class="st-rmg-group-actions st-rmg-group-actions-primary">
             <button type="button" class="menu_button interactable" id="${NEW_GROUP_ID}">新增${FOLDER_LABEL}</button>
             <button type="button" class="menu_button interactable" id="${IMPORT_GROUP_PANEL_ID}">导入${FOLDER_LABEL}</button>
             <button type="button" class="menu_button interactable" id="${RENAME_GROUP_ID}">重命名${FOLDER_LABEL}</button>
           </div>
-          <div class="st-rmg-group-actions st-rmg-danger-actions">
+          <div class="st-rmg-group-actions st-rmg-group-actions-danger st-rmg-danger-actions">
             <button type="button" class="menu_button interactable st-rmg-danger" id="${DELETE_GROUP_ID}">删除${FOLDER_LABEL}</button>
             <button type="button" class="menu_button interactable st-rmg-danger" id="${DELETE_GROUP_WITH_SCRIPTS_ID}">删除${FOLDER_LABEL}及正则</button>
           </div>
         </div>
-        <select id="${GROUP_SELECT_ID}" class="text_pole st-rmg-group-select"></select>
+        <div class="st-rmg-group-select-row">
+          <select id="${GROUP_SELECT_ID}" class="text_pole st-rmg-group-select"></select>
+        </div>
       `;
 
       const selectEl = containerEl.querySelector(`#${GROUP_SELECT_ID}`);
@@ -1151,6 +1343,7 @@
       const listEl = getListEl();
       if (!listEl) return;
 
+      const currentScripts = getScriptsByCurrentScope();
       const groups = getGroups();
       const itemsByGroup = new Map();
       itemsByGroup.set(UNGROUPED_ID, []);
@@ -1182,7 +1375,7 @@
         if (groupId !== UNGROUPED_ID) {
           header.classList.add('st-rmg-folder-draggable');
         }
-        const folderState = getFolderState(groupId, items);
+        const folderState = getFolderState(groupId, items, currentScripts);
         const toggleTitle = folderState === STATE_DISABLED ? `启用${FOLDER_LABEL}` : `关闭${FOLDER_LABEL}`;
         if (folderState === STATE_DISABLED) {
           header.classList.add('st-rmg-folder-disabled');
@@ -1223,7 +1416,7 @@
       function pushItem(item, hidden) {
         item.el.classList.toggle(HIDDEN_CLASS, hidden);
         const groupId = store.assignments[item.id] || UNGROUPED_ID;
-        const isFolderDisabled = !!store.disabledFolders?.[groupId];
+        const isFolderDisabled = getFolderState(groupId, items, currentScripts) === STATE_DISABLED;
         item.el.classList.toggle('st-rmg-folder-item-disabled', isFolderDisabled);
         item.el.classList.toggle('st-rmg-folder-item-locked', isFolderDisabled);
         const disableCheckbox = item.el.querySelector?.('.disable_regex');

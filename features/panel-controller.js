@@ -59,6 +59,7 @@
     const HEADER_ID = `${MODULE_NAME}-${scope}-header`;
     const PANEL_COLLAPSED_KEY = `${MODULE_NAME}:${scope}:panel-collapsed`;
 
+    const activeNativeOrderCache = new Map();
     const GROUP_SELECT_ID = `${MODULE_NAME}-${scope}-group-select`;
     const NEW_GROUP_ID = `${MODULE_NAME}-${scope}-new-group`;
     const RENAME_GROUP_ID = `${MODULE_NAME}-${scope}-rename-group`;
@@ -184,14 +185,21 @@
     function getScriptsByItemId(currentScripts = getScriptsByCurrentScope(), items = []) {
       const map = new Map();
       if (!Array.isArray(currentScripts)) return map;
-      currentScripts.forEach((script, scriptArrayIdx) => {
+      currentScripts.forEach((script, index) => {
         if (!script || typeof script !== 'object') return;
         const scriptId = normalizeName(script.id);
+        // 优先走有 ID 的标准路径
         if (scriptId) map.set(`dom:${scriptId}`, script);
-        
-        const matchedItem = items.find((itm) => itm.originalIndex === scriptArrayIdx);
-        if (matchedItem && matchedItem.id) {
-            map.set(matchedItem.id, script);
+        // 后备1：直接按 items 数组下标对齐（未被重排前最准确）
+        if (items[index]?.id && !map.has(items[index].id)) {
+          map.set(items[index].id, script);
+        }
+        // 后备2：cache（应对分组后物理顺序被打乱的情况）
+        for (const [domItemId, cachedIndex] of activeNativeOrderCache.entries()) {
+          if (cachedIndex === index && !map.has(domItemId)) {
+            map.set(domItemId, script);
+            break;
+          }
         }
       });
       return map;
@@ -354,15 +362,17 @@
 
       let scriptsChanged = false;
       let changedCount = 0;
-      const nextScripts = currentScripts.map((script, scriptArrayIdx) => {
+      const nextScripts = currentScripts.map((script, originalIndex) => {
         const scriptId = normalizeName(script?.id);
         let itemId = null;
         if (scriptId && availableTargetItemIds.has(`dom:${scriptId}`)) {
            itemId = `dom:${scriptId}`;
         } else {
-           const matchedItem = items.find((itm) => itm.originalIndex === scriptArrayIdx);
-           if (matchedItem && availableTargetItemIds.has(matchedItem.id)) {
-               itemId = matchedItem.id;
+           for (const [domItemId, cachedIndex] of activeNativeOrderCache.entries()) {
+              if (cachedIndex === originalIndex && availableTargetItemIds.has(domItemId)) {
+                 itemId = domItemId;
+                 break;
+              }
            }
         }
 
@@ -400,23 +410,25 @@
       }
 
       let activeCount = 0;
-      let scriptLoopIdx = 0;
+      let i = 0;
       for (const script of (scriptsChanged ? nextScripts : currentScripts)) {
         const scriptId = normalizeName(script?.id);
         let itemId = null;
         if (scriptId && availableTargetItemIds.has(`dom:${scriptId}`)) {
            itemId = `dom:${scriptId}`;
         } else {
-           const matchedItem = items.find((itm) => itm.originalIndex === scriptLoopIdx);
-           if (matchedItem && availableTargetItemIds.has(matchedItem.id)) {
-               itemId = matchedItem.id;
+           for (const [domItemId, cachedIndex] of activeNativeOrderCache.entries()) {
+              if (cachedIndex === i && availableTargetItemIds.has(domItemId)) {
+                 itemId = domItemId;
+                 break;
+              }
            }
         }
 
         if (itemId && !script.disabled) {
           activeCount++;
         }
-        scriptLoopIdx++;
+        i++;
       }
 
       const toastMessage = `目前生效 ${activeCount} 条 (共 ${targetItemIds.length} 条)`;
@@ -828,22 +840,14 @@
     }
 
     function collectItems(listEl = getListEl()) {
-      return getDirectScriptItems(listEl).map((itemEl, loopIndex) => {
-        let originalIdxAttr = itemEl.getAttribute('data-original-index');
-        if (originalIdxAttr === null) {
-            originalIdxAttr = loopIndex.toString();
-            itemEl.setAttribute('data-original-index', originalIdxAttr);
-        }
-        return {
-          el: itemEl,
-          index: loopIndex,
-          originalIndex: parseInt(originalIdxAttr, 10),
-          keyCandidate: normalizeName(getItemKeyCandidate(itemEl)),
-          id: getItemId(itemEl),
-          legacyId: getLegacyItemId(itemEl, loopIndex),
-          name: getScriptName(itemEl)
-        };
-      });
+      return getDirectScriptItems(listEl).map((itemEl, index) => ({
+        el: itemEl,
+        index,
+        keyCandidate: normalizeName(getItemKeyCandidate(itemEl)),
+        id: getItemId(itemEl),
+        legacyId: getLegacyItemId(itemEl, index),
+        name: getScriptName(itemEl)
+      }));
     }
 
     function migrateLegacyAssignments(items) {
@@ -1605,6 +1609,10 @@
       rendering = true;
       try {
         const items = collectItems(listEl);
+        activeNativeOrderCache.clear();
+        for (let i = 0; i < items.length; i++) {
+          activeNativeOrderCache.set(items[i].id, i);
+        }
         
         migrateLegacyAssignments(items);
         if (alignImportedAssignments(items)) saveStore();

@@ -1016,8 +1016,9 @@
         const header = document.createElement('div');
         header.className = 'st-rmg-group-header';
         header.dataset.groupId = groupId;
-        if (groupId !== UNGROUPED_ID) {
-          header.classList.add('st-rmg-folder-draggable');
+        header.classList.add('st-rmg-folder-draggable');
+        if (groupId === UNGROUPED_ID) {
+          header.classList.add('st-rmg-folder-not-draggable');
         }
         const folderState = getFolderState(groupId, items);
         const toggleTitle = folderState === STATE_DISABLED ? `启用${FOLDER_LABEL}` : `关闭${FOLDER_LABEL}`;
@@ -1041,7 +1042,14 @@
                 </button>
               </span>
             ` : `
-              <span class="st-rmg-folder-actions is-placeholder" aria-hidden="true"></span>
+              <span class="st-rmg-folder-actions is-placeholder" aria-hidden="true">
+                <button type="button" class="menu_button st-rmg-folder-action st-rmg-folder-action-placeholder" tabindex="-1" disabled aria-hidden="true">
+                  <span class="st-rmg-folder-export-icon" aria-hidden="true">
+                    <span class="st-rmg-folder-export-arrow">↑</span>
+                    <span class="st-rmg-folder-export-tray"></span>
+                  </span>
+                </button>
+              </span>
             `}
             <button type="button" class="st-rmg-folder-switch ${folderState === STATE_DISABLED ? 'is-off' : 'is-on'}" data-folder-toggle="${escapeHtml(groupId)}" title="${escapeHtml(toggleTitle)}" aria-pressed="${folderState === STATE_DISABLED ? 'false' : 'true'}">
               <span class="st-rmg-folder-switch-track">

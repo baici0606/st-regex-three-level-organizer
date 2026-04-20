@@ -157,11 +157,6 @@
   flex-shrink: 0;
 }
 
-.st-rmg-group-header[data-group-id="__ungrouped__"] .st-rmg-folder-handle {
-  visibility: hidden;
-  pointer-events: none;
-  cursor: default;
-}
 
 .st-rmg-folder-actions {
   display: inline-flex;
@@ -276,6 +271,16 @@
 }
 
 .st-rmg-folder-draggable {
+  cursor: default;
+}
+
+.st-rmg-folder-not-draggable {
+  cursor: pointer;
+}
+
+.st-rmg-folder-not-draggable .st-rmg-folder-handle {
+  visibility: hidden;
+  pointer-events: none;
   cursor: default;
 }
 

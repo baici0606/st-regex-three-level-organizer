@@ -849,8 +849,8 @@
       for (const headerEl of Array.from(listEl.querySelectorAll('.st-rmg-group-header'))) {
         if (!(headerEl instanceof HTMLElement)) continue;
         const rect = headerEl.getBoundingClientRect();
-        const lowerBound = rect.top + rect.height * 0.45;
-        const forwardEdgeBottom = rect.bottom + 18;
+        const lowerBound = rect.top + rect.height * 0.6;
+        const forwardEdgeBottom = rect.bottom + 10;
         if (clientY >= lowerBound && clientY <= forwardEdgeBottom) {
           return {
             groupId: String(headerEl.dataset.groupId || UNGROUPED_ID),
@@ -925,9 +925,11 @@
 
       const targetAnchor = Array.from(listEl.querySelectorAll('.st-rmg-sort-anchor')).find((anchorEl) => anchorEl.dataset.groupId === targetGroupId);
       if (!(targetAnchor instanceof HTMLElement)) return;
-      if (placeholderEl.previousElementSibling === targetAnchor.previousElementSibling && placeholderEl.nextElementSibling === targetAnchor) return;
+      const targetHeader = targetAnchor.previousElementSibling;
+      if (!(targetHeader instanceof HTMLElement) || !targetHeader.classList.contains('st-rmg-group-header')) return;
+      if (placeholderEl.previousElementSibling === targetHeader && placeholderEl.nextElementSibling === targetAnchor) return;
 
-      targetAnchor.insertAdjacentElement('beforebegin', placeholderEl);
+      targetHeader.insertAdjacentElement('afterend', placeholderEl);
       sortingTargetGroupId = targetGroupId;
     }
 

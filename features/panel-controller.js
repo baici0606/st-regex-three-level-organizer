@@ -67,6 +67,7 @@
     let sorting = false;
     let sortingItemId = '';
     let sortingTargetGroupId = undefined;
+    let sortingHighlightGroupId = '';
     let draggingFolderId = '';
     let folderDropTargetId = '';
     let folderDropAfter = false;
@@ -842,11 +843,55 @@
       return UNGROUPED_ID;
     }
 
+    function getHeaderDropTarget(listEl, clientY) {
+      if (!(listEl instanceof HTMLElement) || !Number.isFinite(clientY)) return null;
+
+      for (const headerEl of Array.from(listEl.querySelectorAll('.st-rmg-group-header'))) {
+        if (!(headerEl instanceof HTMLElement)) continue;
+        const rect = headerEl.getBoundingClientRect();
+        const lowerBound = rect.top + rect.height * 0.45;
+        const forwardEdgeBottom = rect.bottom + 18;
+        if (clientY >= lowerBound && clientY <= forwardEdgeBottom) {
+          return {
+            groupId: String(headerEl.dataset.groupId || UNGROUPED_ID),
+            headerEl,
+          };
+        }
+      }
+
+      return null;
+    }
+
+    function clearItemDropTargetHighlight(listEl = getListEl()) {
+      if (!(listEl instanceof HTMLElement)) return;
+      for (const headerEl of Array.from(listEl.querySelectorAll('.st-rmg-group-header.st-rmg-item-drop-target'))) {
+        headerEl.classList.remove('st-rmg-item-drop-target');
+      }
+      sortingHighlightGroupId = '';
+    }
+
+    function setItemDropTargetHighlight(groupId, listEl = getListEl()) {
+      if (!(listEl instanceof HTMLElement)) return;
+      if (sortingHighlightGroupId === groupId) return;
+      clearItemDropTargetHighlight(listEl);
+      const headerEl = Array.from(listEl.querySelectorAll('.st-rmg-group-header')).find((el) => el.dataset.groupId === groupId);
+      if (headerEl instanceof HTMLElement) {
+        headerEl.classList.add('st-rmg-item-drop-target');
+        sortingHighlightGroupId = groupId;
+      }
+    }
+
     function getTargetGroupIdFromPointer(listEl, event) {
       const source = event?.originalEvent || event;
       const clientX = Number(source?.clientX ?? event?.clientX);
       const clientY = Number(source?.clientY ?? event?.clientY);
       if (!Number.isFinite(clientY)) return undefined;
+
+      const headerDropTarget = getHeaderDropTarget(listEl, clientY);
+      if (headerDropTarget?.groupId) {
+        setItemDropTargetHighlight(headerDropTarget.groupId, listEl);
+        return headerDropTarget.groupId;
+      }
 
       if (Number.isFinite(clientX) && typeof document.elementsFromPoint === 'function') {
         const hoveredElements = document.elementsFromPoint(clientX, clientY);
@@ -855,11 +900,20 @@
           if (hoveredElement.classList.contains('ui-sortable-helper') || hoveredElement.classList.contains('ui-sortable-placeholder')) continue;
           const listChild = hoveredElement.closest('.st-rmg-group-header, .st-rmg-sort-anchor, .regex-script-label');
           const groupId = getGroupIdFromListChild(listEl, listChild);
-          if (groupId !== undefined) return groupId;
+          if (groupId !== undefined) {
+            setItemDropTargetHighlight(groupId, listEl);
+            return groupId;
+          }
         }
       }
 
-      return getGroupIdFromVerticalPosition(listEl, clientY);
+      const fallbackGroupId = getGroupIdFromVerticalPosition(listEl, clientY);
+      if (fallbackGroupId !== undefined) {
+        setItemDropTargetHighlight(fallbackGroupId, listEl);
+      } else {
+        clearItemDropTargetHighlight(listEl);
+      }
+      return fallbackGroupId;
     }
 
     function movePlaceholderIntoTargetGroup(listEl, event, ui) {
@@ -871,9 +925,9 @@
 
       const targetAnchor = Array.from(listEl.querySelectorAll('.st-rmg-sort-anchor')).find((anchorEl) => anchorEl.dataset.groupId === targetGroupId);
       if (!(targetAnchor instanceof HTMLElement)) return;
-      if (placeholderEl.previousElementSibling === targetAnchor) return;
+      if (placeholderEl.previousElementSibling === targetAnchor.previousElementSibling && placeholderEl.nextElementSibling === targetAnchor) return;
 
-      targetAnchor.insertAdjacentElement('afterend', placeholderEl);
+      targetAnchor.insertAdjacentElement('beforebegin', placeholderEl);
       sortingTargetGroupId = targetGroupId;
     }
 
@@ -903,6 +957,7 @@
           sortingItemId = getItemId(ui?.item?.[0]);
           const currentScriptId = normalizeName(sortingItemId).startsWith('dom:') ? normalizeName(sortingItemId).slice(4) : '';
           sortingTargetGroupId = currentScriptId ? (getAssignedGroupIdForScriptId(currentScriptId) || UNGROUPED_ID) : UNGROUPED_ID;
+          clearItemDropTargetHighlight(listEl);
           return typeof originalStart === 'function' ? originalStart.call(this, event, ui) : undefined;
         });
 
@@ -927,6 +982,7 @@
             sorting = false;
             sortingItemId = '';
             sortingTargetGroupId = undefined;
+            clearItemDropTargetHighlight(listEl);
             await renderTree();
           });
           return result;

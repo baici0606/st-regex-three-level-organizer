@@ -887,6 +887,7 @@
         if (!sortable.sortable('instance')) return;
 
         sortable.sortable('option', 'items', '> .regex-script-label:not(.st-rmg-hidden), > .st-rmg-sort-anchor');
+        sortable.sortable('option', 'handle', '.drag-handle, .regex_script_name');
         sortable.sortable('option', 'cancel', '.st-rmg-group-header');
         sortable.sortable('option', 'tolerance', 'pointer');
 

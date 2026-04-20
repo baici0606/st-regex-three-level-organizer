@@ -374,7 +374,7 @@
         }
       }
 
-      const toastMessage = `本次${enabled ? '开启' : '关闭'} ${changedCount} 条正则 (该文件夹共 ${targetItemIds.length} 条 / 当前已生效 ${activeCount} 条)`;
+      const toastMessage = `本次${enabled ? '开启' : '关闭'} ${changedCount} 条正则<br>(该文件夹共 ${targetItemIds.length} 条 / 当前已生效 ${activeCount} 条)`;
 
       if (!scriptsChanged) {
         toast(toastMessage, 'success');

@@ -154,10 +154,23 @@
       }
       if (scriptType === 2) {
         const presetManager = getRegexPresetManager(ctx);
-        const presetName = presetManager?.getSelectedPresetName?.();
-        const presetScripts = presetManager?.readPresetExtensionField?.({ name: presetName, path: 'regex_scripts' })
-          ?? presetManager?.readPresetExtensionField?.({ path: 'regex_scripts' });
-        return Array.isArray(presetScripts) ? presetScripts : [];
+        if (presetManager) {
+          const presetName = presetManager?.getSelectedPresetName?.();
+          const presetScripts = presetManager?.readPresetExtensionField?.({ name: presetName, path: 'regex_scripts' })
+            ?? presetManager?.readPresetExtensionField?.({ path: 'regex_scripts' });
+          if (Array.isArray(presetScripts)) return presetScripts;
+        }
+        // ST 1.17 fallback
+        const presets = ctx?.extensionSettings?.regex_presets;
+        if (Array.isArray(presets)) {
+          const sel = presets.find(p => p.isSelected) || presets[0];
+          if (sel) {
+            if (Array.isArray(sel.regex_scripts)) return sel.regex_scripts;
+            if (Array.isArray(sel.scripts)) return sel.scripts;
+            if (Array.isArray(sel.regex)) return sel.regex;
+          }
+        }
+        return [];
       }
       return [];
     }
@@ -235,18 +248,40 @@
 
       if (scriptType === 1) {
         const characterId = ctx?.characterId;
-        if (characterId === undefined || typeof ctx?.writeExtensionField !== 'function') return;
-        await ctx.writeExtensionField(characterId, 'regex_scripts', nextScripts);
+        if (characterId === undefined || characterId === null) return;
+        if (typeof ctx?.writeExtensionField === 'function') {
+          await ctx.writeExtensionField(characterId, 'regex_scripts', nextScripts);
+        } else if (ctx?.characters?.[characterId]) {
+          // ST 1.17 fallback
+          const charData = ctx.characters[characterId];
+          if (!charData.data) charData.data = {};
+          if (!charData.data.extensions) charData.data.extensions = {};
+          charData.data.extensions.regex_scripts = nextScripts;
+          if (typeof window.saveSettingsDebounced === 'function') window.saveSettingsDebounced();
+        }
         return;
       }
 
       if (scriptType === 2) {
         const presetManager = getRegexPresetManager(ctx);
-        const presetName = presetManager?.getSelectedPresetName?.();
-        if (!presetManager || !presetName) return;
-        await presetManager.writePresetExtensionField({ name: presetName, path: 'regex_scripts', value: nextScripts });
-        // 等待写入完成再继续
-        await new Promise((resolve) => window.setTimeout(resolve, 100));
+        if (presetManager) {
+          const presetName = presetManager?.getSelectedPresetName?.();
+          if (presetName) {
+            await presetManager.writePresetExtensionField({ name: presetName, path: 'regex_scripts', value: nextScripts });
+            await new Promise((resolve) => window.setTimeout(resolve, 100));
+            return;
+          }
+        }
+        // ST 1.17 fallback
+        const presets = ctx?.extensionSettings?.regex_presets;
+        if (Array.isArray(presets)) {
+          const sel = presets.find(p => p.isSelected) || presets[0];
+          if (sel) {
+            sel.regex_scripts = nextScripts;
+            ctx?.saveSettingsDebounced?.();
+            await new Promise((resolve) => window.setTimeout(resolve, 100));
+          }
+        }
       }
     }
 
@@ -385,20 +420,23 @@
         }
         if (snapshotChanged) saveStore();
 
-        // 第二步：等待 ST 的事件处理器完成（包括可能的异步保存和 DOM 更新）
+        // 等待 ST 事件处理器和渲染完成
         if (changedCount > 0) {
-          await new Promise((resolve) => window.setTimeout(resolve, 300));
+          await new Promise((resolve) => window.setTimeout(resolve, 200));
         }
 
-        // 第三步：重新从 DOM 取新鲜 item 状态来统计（避免旧引用读到脏数据）
+        // 直接通过新鲜 DOM 状态读出当前激活条数，确保存统数据绝对准确
         const freshItems = collectItems();
-        const freshItemById = new Map(freshItems.map(item => [item.id, item]));
-        const activeCount = targetItemIds.reduce((count, itemId) => {
-          const freshItem = freshItemById.get(itemId);
-          const el = freshItem?.el ?? items.find(i => i.id === itemId)?.el;
-          const cb = el?.querySelector('input[type=checkbox]');
-          return count + (cb?.checked === true ? 1 : 0);
-        }, 0);
+        let activeCount = 0;
+        for (const itemId of targetItemIds) {
+          const freshItem = freshItems.find(i => i.id === itemId) || items.find(i => i.id === itemId);
+          if (freshItem?.el) {
+            const cb = freshItem.el.querySelector('input[type=checkbox]');
+            if (cb && cb.checked) {
+              activeCount++;
+            }
+          }
+        }
 
         toast(`目前生效 ${activeCount} 条 (共 ${targetItemIds.length} 条)`, 'success', `本次${enabled ? '开启' : '关闭'} ${changedCount} 条`);
         if (changedCount > 0) {
@@ -787,20 +825,17 @@
         return;
       }
 
-      // 预设正则：如果读取到的脚本数据为空，说明该 ST 版本的预设 API 不支持写入
-      // 导入会保存到无效路径，刷新后脚本消失，直接提示不支持
-      if (currentScripts.length === 0 && getScriptType() === 2) {
-        const testPm = getRegexPresetManager(ctx);
-        const testName = testPm?.getSelectedPresetName?.();
-        if (!testPm || !testName) {
-          toast('当前 ST 版本的预设正则不支持通过此插件导入脚本\n请直接在 ST 的预设正则面板手动添加后再分组', 'warning');
-          return;
+      // 预设正则：如果是 ST 1.17 等旧版本且没有可用的预设列表，自动创建一个初始列表以供导入
+      if (getScriptType() === 2) {
+        const presets = ctx?.extensionSettings?.regex_presets;
+        if (!presets || (Array.isArray(presets) && presets.length === 0)) {
+          ctx.extensionSettings.regex_presets = [{ name: 'Default', isSelected: true, regex_scripts: [] }];
         }
       }
 
       // 局部正则：如果没有选中角色，导入会静默失败
       if (getScriptType() === 1 && (ctx?.characterId === undefined || ctx?.characterId === null)) {
-        toast('请先在 ST 中选中一个角色，再向局部正则导入文件夹', 'warning');
+        toast('请先在 ST 中选中一个角色，然后再向局部正则导入文件夹', 'warning');
         return;
       }
       let nextGroupId = uid('group');

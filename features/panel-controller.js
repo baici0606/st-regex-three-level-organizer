@@ -277,7 +277,12 @@
         if (Array.isArray(presets)) {
           const sel = presets.find(p => p.isSelected) || presets[0];
           if (sel) {
-            sel.regex_scripts = nextScripts;
+            // Update the array that originally existed
+            if (Array.isArray(sel.regex_scripts)) sel.regex_scripts = nextScripts;
+            else if (Array.isArray(sel.scripts)) sel.scripts = nextScripts;
+            else if (Array.isArray(sel.regex)) sel.regex = nextScripts;
+            else sel.scripts = nextScripts; // Default fallback to match legacy
+            
             ctx?.saveSettingsDebounced?.();
             await new Promise((resolve) => window.setTimeout(resolve, 100));
           }
@@ -857,13 +862,9 @@
 
         const originalId = normalizeName(clonedScript.id);
         const originalDisabled = !!clonedScript.disabled;
-        let nextScriptId = '';
-        if (originalId && !existingScriptIds.has(originalId)) {
-          nextScriptId = originalId;
-          existingScriptIds.add(nextScriptId);
-        } else {
-          nextScriptId = generateUniqueScriptId(existingScriptIds);
-        }
+        // Always generate a new script ID to prevent cross-scope DOM collisions 
+        // (e.g. Global vs Preset lists sharing standard numeric ID namespaces)
+        const nextScriptId = generateUniqueScriptId(existingScriptIds);
 
         clonedScript.id = nextScriptId;
         if (bundle.group.disabled) clonedScript.disabled = true;
@@ -1112,12 +1113,16 @@
     function renderGroupManager(containerEl) {
       if (!containerEl) return;
       containerEl.innerHTML = `
-        <div class="st-rmg-group-actions">
-          <button type="button" class="menu_button interactable" id="${NEW_GROUP_ID}">新增${FOLDER_LABEL}</button>
-          <button type="button" class="menu_button interactable" id="${IMPORT_GROUP_PANEL_ID}">导入${FOLDER_LABEL}</button>
-          <button type="button" class="menu_button interactable" id="${RENAME_GROUP_ID}">重命名${FOLDER_LABEL}</button>
-          <button type="button" class="menu_button interactable st-rmg-danger" id="${DELETE_GROUP_ID}">删除${FOLDER_LABEL}</button>
-          <button type="button" class="menu_button interactable st-rmg-danger" id="${DELETE_GROUP_WITH_SCRIPTS_ID}">删除${FOLDER_LABEL}及正则</button>
+        <div class="st-rmg-group-actions-container">
+          <div class="st-rmg-group-actions">
+            <button type="button" class="menu_button interactable" id="${NEW_GROUP_ID}">新增${FOLDER_LABEL}</button>
+            <button type="button" class="menu_button interactable" id="${IMPORT_GROUP_PANEL_ID}">导入${FOLDER_LABEL}</button>
+            <button type="button" class="menu_button interactable" id="${RENAME_GROUP_ID}">重命名${FOLDER_LABEL}</button>
+          </div>
+          <div class="st-rmg-group-actions st-rmg-danger-actions">
+            <button type="button" class="menu_button interactable st-rmg-danger" id="${DELETE_GROUP_ID}">删除${FOLDER_LABEL}</button>
+            <button type="button" class="menu_button interactable st-rmg-danger" id="${DELETE_GROUP_WITH_SCRIPTS_ID}">删除${FOLDER_LABEL}及正则</button>
+          </div>
         </div>
         <select id="${GROUP_SELECT_ID}" class="text_pole st-rmg-group-select"></select>
       `;

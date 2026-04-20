@@ -80,8 +80,19 @@
 
     if (scope === 'preset') {
       const presetManager = getRegexPresetManager(ctx);
-      const apiId = presetManager?.apiId ?? 'no-api';
-      const presetName = presetManager?.getSelectedPresetName?.() ?? 'no-preset';
+      let apiId = 'no-api';
+      let presetName = 'no-preset';
+      
+      if (presetManager) {
+        apiId = presetManager?.apiId ?? 'no-api';
+        presetName = presetManager?.getSelectedPresetName?.() ?? 'no-preset';
+      } else {
+        const presets = ctx?.extensionSettings?.regex_presets;
+        if (Array.isArray(presets)) {
+          const sel = presets.find(p => p.isSelected) || presets[0];
+          if (sel?.name) presetName = sel.name;
+        }
+      }
       return `preset:${keySegment(apiId, 'no-api')}:${keySegment(presetName, 'no-preset')}`;
     }
 

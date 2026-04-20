@@ -67,9 +67,18 @@
 
 .st-rmg-group-actions {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: 3px;
   align-items: center;
+}
+
+.st-rmg-group-actions-primary,
+.st-rmg-group-actions-danger {
+  width: 100%;
+}
+
+.st-rmg-group-actions-danger {
+  justify-content: flex-start;
 }
 
 .st-rmg-group-actions>.menu_button {

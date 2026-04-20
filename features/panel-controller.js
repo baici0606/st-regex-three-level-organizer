@@ -129,13 +129,8 @@
       }
 
       if (scriptType === 2) {
-        const presetManager = getRegexPresetManager(ctx);
-        if (presetManager) {
-          const presetName = presetManager?.getSelectedPresetName?.();
-          const presetScripts = presetManager?.readPresetExtensionField?.({ name: presetName, path: 'regex_scripts' })
-            ?? presetManager?.readPresetExtensionField?.({ path: 'regex_scripts' });
-          if (Array.isArray(presetScripts)) return presetScripts;
-        }
+        const presetScripts = readPresetScripts(ctx);
+        if (Array.isArray(presetScripts)) return presetScripts;
 
         const presets = ctx?.extensionSettings?.regex_presets;
         if (Array.isArray(presets)) {
@@ -147,6 +142,46 @@
       }
 
       return [];
+    }
+
+    function getSelectedPresetContext(ctx = getCtx()) {
+      const presetManager = getRegexPresetManager(ctx);
+      const presetName = presetManager?.getSelectedPresetName?.();
+      if (!presetManager || !presetName) {
+        return { presetManager: null, presetName: '' };
+      }
+
+      return {
+        presetManager,
+        presetName: String(presetName),
+      };
+    }
+
+    function readPresetScripts(ctx = getCtx()) {
+      const { presetManager, presetName } = getSelectedPresetContext(ctx);
+      if (!presetManager || !presetName) return null;
+
+      const presetScripts = presetManager.readPresetExtensionField({ name: presetName, path: 'regex_scripts' })
+        ?? presetManager.readPresetExtensionField({ path: 'regex_scripts' });
+
+      return Array.isArray(presetScripts) ? presetScripts : [];
+    }
+
+    async function writePresetScripts(nextScripts, ctx = getCtx()) {
+      const { presetManager, presetName } = getSelectedPresetContext(ctx);
+      if (!presetManager || !presetName) {
+        toast('当前没有可用的预设接口或未选中预设，无法保存预设正则', 'warning');
+        return false;
+      }
+
+      await presetManager.writePresetExtensionField({ name: presetName, path: 'regex_scripts', value: nextScripts });
+      const verifiedScripts = readPresetScripts(ctx);
+      if (!Array.isArray(verifiedScripts)) {
+        toast('预设正则写入后读回失败', 'error');
+        return false;
+      }
+
+      return true;
     }
 
     async function saveScriptsForCurrentScope(nextScripts, ctx = getCtx()) {
@@ -178,13 +213,9 @@
       }
 
       if (scriptType === 2) {
-        const presetManager = getRegexPresetManager(ctx);
-        if (presetManager) {
-          const presetName = presetManager?.getSelectedPresetName?.();
-          if (presetName) {
-            await presetManager.writePresetExtensionField({ name: presetName, path: 'regex_scripts', value: nextScripts });
-            return;
-          }
+        const wrotePreset = await writePresetScripts(nextScripts, ctx);
+        if (wrotePreset) {
+          return;
         }
 
         const presets = ctx?.extensionSettings?.regex_presets;
@@ -551,9 +582,9 @@
       }
 
       if (getScriptType() === 2) {
-        const presets = ctx?.extensionSettings?.regex_presets;
-        if (!Array.isArray(presets) || presets.length < 1) {
-          toast('当前没有可用的预设，无法导入文件夹', 'warning');
+        const { presetManager, presetName } = getSelectedPresetContext(ctx);
+        if (!presetManager || !presetName) {
+          toast('当前没有可用的预设接口或未选中预设，无法导入文件夹', 'warning');
           return;
         }
       }
@@ -586,7 +617,21 @@
       }
 
       saveStore();
-      await saveScriptsForCurrentScope(currentScripts.concat(importedScripts), ctx);
+      const nextScripts = currentScripts.concat(importedScripts);
+      await saveScriptsForCurrentScope(nextScripts, ctx);
+
+      if (getScriptType() === 2) {
+        const verifiedScripts = readPresetScripts(ctx);
+        const importedIds = new Set(importedScripts.map((script) => normalizeName(script.id)).filter(Boolean));
+        const verifiedCount = Array.isArray(verifiedScripts)
+          ? verifiedScripts.filter((script) => importedIds.has(normalizeName(script?.id))).length
+          : 0;
+        if (verifiedCount !== importedIds.size) {
+          toast(`预设正则导入不完整：期望 ${importedIds.size} 条，实际写入 ${verifiedCount} 条`, 'error');
+          return;
+        }
+      }
+
       await reloadRegexUi(ctx);
       await renderTree();
       toast(`已导入${FOLDER_LABEL}“${nextGroupName}”`, 'success');
@@ -626,10 +671,12 @@
       if (!containerEl) return;
 
       containerEl.innerHTML = `
-        <div class="st-rmg-group-actions">
+        <div class="st-rmg-group-actions st-rmg-group-actions-primary">
           <button type="button" class="menu_button interactable" id="${NEW_GROUP_ID}">新增${FOLDER_LABEL}</button>
           <button type="button" class="menu_button interactable" id="${IMPORT_GROUP_PANEL_ID}">导入${FOLDER_LABEL}</button>
           <button type="button" class="menu_button interactable" id="${RENAME_GROUP_ID}">重命名${FOLDER_LABEL}</button>
+        </div>
+        <div class="st-rmg-group-actions st-rmg-group-actions-danger">
           <button type="button" class="menu_button interactable st-rmg-danger" id="${DELETE_GROUP_ID}">删除${FOLDER_LABEL}</button>
           <button type="button" class="menu_button interactable st-rmg-danger" id="${DELETE_GROUP_WITH_SCRIPTS_ID}">删除${FOLDER_LABEL}及正则</button>
         </div>

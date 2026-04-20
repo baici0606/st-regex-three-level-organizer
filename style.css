@@ -184,13 +184,12 @@
 }
 
 .st-rmg-folder-action-placeholder {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  min-width: 26px;
-  min-height: 26px;
   filter: saturate(0.2) brightness(0.8);
+  box-shadow: none;
+}
+
+.st-rmg-folder-action-placeholder:disabled {
+  opacity: 0.7;
 }
 
 .st-rmg-folder-action.menu_button {

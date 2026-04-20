@@ -188,18 +188,12 @@
       currentScripts.forEach((script, index) => {
         if (!script || typeof script !== 'object') return;
         const scriptId = normalizeName(script.id);
-        // 优先走有 ID 的标准路径
-        if (scriptId) map.set(`dom:${scriptId}`, script);
-        // 后备1：直接按 items 数组下标对齐（未被重排前最准确）
-        if (items[index]?.id && !map.has(items[index].id)) {
+        if (scriptId) {
+          // 有 ID：标准路径
+          map.set(`dom:${scriptId}`, script);
+        } else if (items[index]?.id) {
+          // 无 ID：按 DOM 下标对齐
           map.set(items[index].id, script);
-        }
-        // 后备2：cache（应对分组后物理顺序被打乱的情况）
-        for (const [domItemId, cachedIndex] of activeNativeOrderCache.entries()) {
-          if (cachedIndex === index && !map.has(domItemId)) {
-            map.set(domItemId, script);
-            break;
-          }
         }
       });
       return map;
@@ -362,21 +356,16 @@
 
       let scriptsChanged = false;
       let changedCount = 0;
-      const nextScripts = currentScripts.map((script, originalIndex) => {
+      const nextScripts = currentScripts.map((script, index) => {
         const scriptId = normalizeName(script?.id);
-        let itemId = null;
-        if (scriptId && availableTargetItemIds.has(`dom:${scriptId}`)) {
-           itemId = `dom:${scriptId}`;
-        } else {
-           for (const [domItemId, cachedIndex] of activeNativeOrderCache.entries()) {
-              if (cachedIndex === originalIndex && availableTargetItemIds.has(domItemId)) {
-                 itemId = domItemId;
-                 break;
-              }
-           }
+        let itemId;
+        if (scriptId) {
+          itemId = `dom:${scriptId}`;
+        } else if (items[index]?.id) {
+          itemId = items[index].id;
         }
 
-        if (!itemId) return script;
+        if (!itemId || !availableTargetItemIds.has(itemId)) return script;
 
         if (!enabled) {
           if (!Object.prototype.hasOwnProperty.call(nextSnapshot, itemId)) {
@@ -410,25 +399,19 @@
       }
 
       let activeCount = 0;
-      let i = 0;
-      for (const script of (scriptsChanged ? nextScripts : currentScripts)) {
+      const checkScripts = scriptsChanged ? nextScripts : currentScripts;
+      for (let i = 0; i < checkScripts.length; i++) {
+        const script = checkScripts[i];
         const scriptId = normalizeName(script?.id);
-        let itemId = null;
-        if (scriptId && availableTargetItemIds.has(`dom:${scriptId}`)) {
-           itemId = `dom:${scriptId}`;
-        } else {
-           for (const [domItemId, cachedIndex] of activeNativeOrderCache.entries()) {
-              if (cachedIndex === i && availableTargetItemIds.has(domItemId)) {
-                 itemId = domItemId;
-                 break;
-              }
-           }
+        let itemId;
+        if (scriptId) {
+          itemId = `dom:${scriptId}`;
+        } else if (items[i]?.id) {
+          itemId = items[i].id;
         }
-
-        if (itemId && !script.disabled) {
+        if (itemId && availableTargetItemIds.has(itemId) && !script.disabled) {
           activeCount++;
         }
-        i++;
       }
 
       const toastMessage = `目前生效 ${activeCount} 条 (共 ${targetItemIds.length} 条)`;

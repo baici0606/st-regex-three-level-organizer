@@ -152,21 +152,23 @@
       }
       if (scriptType === 2) {
         const presetManager = getRegexPresetManager(ctx);
-        const presetScripts = presetManager?.readPresetExtensionField?.({ path: 'regex_scripts' });
+        const presetName = presetManager?.getSelectedPresetName?.();
+        const presetScripts = presetManager?.readPresetExtensionField?.({ name: presetName, path: 'regex_scripts' });
         return Array.isArray(presetScripts) ? presetScripts : [];
       }
       return [];
     }
 
-    function getScriptsByItemId(currentScripts = getScriptsByCurrentScope()) {
-      return new Map(
-        currentScripts
-          .filter((script) => script && typeof script === 'object' && normalizeName(script.id))
-          .map((script) => {
-            const scriptId = normalizeName(script.id);
-            return [`dom:${scriptId}`, script];
-          })
-      );
+    function getScriptsByItemId(currentScripts = getScriptsByCurrentScope(), items = []) {
+      const map = new Map();
+      if (!Array.isArray(currentScripts)) return map;
+      currentScripts.forEach((script, index) => {
+        if (!script || typeof script !== 'object') return;
+        const scriptId = normalizeName(script.id);
+        if (scriptId) map.set(`dom:${scriptId}`, script);
+        if (items[index] && items[index].id) map.set(items[index].id, script);
+      });
+      return map;
     }
 
     function getScriptIdFromItemId(itemId) {
@@ -312,7 +314,7 @@
         return false;
       }
 
-      const availableScriptsByItemId = getScriptsByItemId(currentScripts);
+      const availableScriptsByItemId = getScriptsByItemId(currentScripts, items);
       const availableTargetItemIds = new Set(targetItemIds.filter((itemId) => availableScriptsByItemId.has(itemId)));
       const existingSnapshotSource = store.disabledSnapshots?.[groupId];
       const existingSnapshot = existingSnapshotSource && typeof existingSnapshotSource === 'object' ? { ...existingSnapshotSource } : {};
@@ -326,12 +328,13 @@
 
       let scriptsChanged = false;
       let changedCount = 0;
-      const nextScripts = currentScripts.map((script) => {
+      const nextScripts = currentScripts.map((script, index) => {
         const scriptId = normalizeName(script?.id);
-        if (!scriptId) return script;
+        let itemId = null;
+        if (scriptId && availableTargetItemIds.has(`dom:${scriptId}`)) itemId = `dom:${scriptId}`;
+        else if (items[index]?.id && availableTargetItemIds.has(items[index].id)) itemId = items[index].id;
 
-        const itemId = `dom:${scriptId}`;
-        if (!availableTargetItemIds.has(itemId)) return script;
+        if (!itemId) return script;
 
         if (!enabled) {
           if (!Object.prototype.hasOwnProperty.call(nextSnapshot, itemId)) {
@@ -365,13 +368,17 @@
       }
 
       let activeCount = 0;
+      let i = 0;
       for (const script of (scriptsChanged ? nextScripts : currentScripts)) {
         const scriptId = normalizeName(script?.id);
-        if (!scriptId) continue;
-        const itemId = `dom:${scriptId}`;
-        if (availableTargetItemIds.has(itemId) && !script.disabled) {
+        let itemId = null;
+        if (scriptId && availableTargetItemIds.has(`dom:${scriptId}`)) itemId = `dom:${scriptId}`;
+        else if (items[i]?.id && availableTargetItemIds.has(items[i].id)) itemId = items[i].id;
+
+        if (itemId && !script.disabled) {
           activeCount++;
         }
+        i++;
       }
 
       const toastMessage = `本次${enabled ? '开启' : '关闭'} ${changedCount} 条正则\n(该文件夹共 ${targetItemIds.length} 条 / 当前已生效 ${activeCount} 条)`;

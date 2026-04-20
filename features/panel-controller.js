@@ -59,7 +59,6 @@
     const HEADER_ID = `${MODULE_NAME}-${scope}-header`;
     const PANEL_COLLAPSED_KEY = `${MODULE_NAME}:${scope}:panel-collapsed`;
 
-    const activeNativeOrderCache = new Map();
     const GROUP_SELECT_ID = `${MODULE_NAME}-${scope}-group-select`;
     const NEW_GROUP_ID = `${MODULE_NAME}-${scope}-new-group`;
     const RENAME_GROUP_ID = `${MODULE_NAME}-${scope}-rename-group`;
@@ -185,16 +184,14 @@
     function getScriptsByItemId(currentScripts = getScriptsByCurrentScope(), items = []) {
       const map = new Map();
       if (!Array.isArray(currentScripts)) return map;
-      currentScripts.forEach((script, index) => {
+      currentScripts.forEach((script, scriptArrayIdx) => {
         if (!script || typeof script !== 'object') return;
         const scriptId = normalizeName(script.id);
         if (scriptId) map.set(`dom:${scriptId}`, script);
         
-        for (const [domItemId, cachedIndex] of activeNativeOrderCache.entries()) {
-           if (cachedIndex === index) {
-              map.set(domItemId, script);
-              break;
-           }
+        const matchedItem = items.find((itm) => itm.originalIndex === scriptArrayIdx);
+        if (matchedItem && matchedItem.id) {
+            map.set(matchedItem.id, script);
         }
       });
       return map;
@@ -357,17 +354,15 @@
 
       let scriptsChanged = false;
       let changedCount = 0;
-      const nextScripts = currentScripts.map((script, originalIndex) => {
+      const nextScripts = currentScripts.map((script, scriptArrayIdx) => {
         const scriptId = normalizeName(script?.id);
         let itemId = null;
         if (scriptId && availableTargetItemIds.has(`dom:${scriptId}`)) {
            itemId = `dom:${scriptId}`;
         } else {
-           for (const [domItemId, cachedIndex] of activeNativeOrderCache.entries()) {
-              if (cachedIndex === originalIndex && availableTargetItemIds.has(domItemId)) {
-                 itemId = domItemId;
-                 break;
-              }
+           const matchedItem = items.find((itm) => itm.originalIndex === scriptArrayIdx);
+           if (matchedItem && availableTargetItemIds.has(matchedItem.id)) {
+               itemId = matchedItem.id;
            }
         }
 
@@ -405,25 +400,23 @@
       }
 
       let activeCount = 0;
-      let i = 0;
+      let scriptLoopIdx = 0;
       for (const script of (scriptsChanged ? nextScripts : currentScripts)) {
         const scriptId = normalizeName(script?.id);
         let itemId = null;
         if (scriptId && availableTargetItemIds.has(`dom:${scriptId}`)) {
            itemId = `dom:${scriptId}`;
         } else {
-           for (const [domItemId, cachedIndex] of activeNativeOrderCache.entries()) {
-              if (cachedIndex === i && availableTargetItemIds.has(domItemId)) {
-                 itemId = domItemId;
-                 break;
-              }
+           const matchedItem = items.find((itm) => itm.originalIndex === scriptLoopIdx);
+           if (matchedItem && availableTargetItemIds.has(matchedItem.id)) {
+               itemId = matchedItem.id;
            }
         }
 
         if (itemId && !script.disabled) {
           activeCount++;
         }
-        i++;
+        scriptLoopIdx++;
       }
 
       const toastMessage = `目前生效 ${activeCount} 条 (共 ${targetItemIds.length} 条)`;
@@ -835,14 +828,22 @@
     }
 
     function collectItems(listEl = getListEl()) {
-      return getDirectScriptItems(listEl).map((itemEl, index) => ({
-        el: itemEl,
-        index,
-        keyCandidate: normalizeName(getItemKeyCandidate(itemEl)),
-        id: getItemId(itemEl),
-        legacyId: getLegacyItemId(itemEl, index),
-        name: getScriptName(itemEl)
-      }));
+      return getDirectScriptItems(listEl).map((itemEl, loopIndex) => {
+        let originalIdxAttr = itemEl.getAttribute('data-original-index');
+        if (originalIdxAttr === null) {
+            originalIdxAttr = loopIndex.toString();
+            itemEl.setAttribute('data-original-index', originalIdxAttr);
+        }
+        return {
+          el: itemEl,
+          index: loopIndex,
+          originalIndex: parseInt(originalIdxAttr, 10),
+          keyCandidate: normalizeName(getItemKeyCandidate(itemEl)),
+          id: getItemId(itemEl),
+          legacyId: getLegacyItemId(itemEl, loopIndex),
+          name: getScriptName(itemEl)
+        };
+      });
     }
 
     function migrateLegacyAssignments(items) {
@@ -1604,10 +1605,6 @@
       rendering = true;
       try {
         const items = collectItems(listEl);
-        activeNativeOrderCache.clear();
-        for (let i = 0; i < items.length; i++) {
-          activeNativeOrderCache.set(items[i].id, i);
-        }
         
         migrateLegacyAssignments(items);
         if (alignImportedAssignments(items)) saveStore();

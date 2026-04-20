@@ -871,9 +871,9 @@
 
       const targetAnchor = Array.from(listEl.querySelectorAll('.st-rmg-sort-anchor')).find((anchorEl) => anchorEl.dataset.groupId === targetGroupId);
       if (!(targetAnchor instanceof HTMLElement)) return;
-      if (placeholderEl.nextElementSibling === targetAnchor) return;
+      if (placeholderEl.previousElementSibling === targetAnchor) return;
 
-      targetAnchor.insertAdjacentElement('beforebegin', placeholderEl);
+      targetAnchor.insertAdjacentElement('afterend', placeholderEl);
       sortingTargetGroupId = targetGroupId;
     }
 
@@ -918,7 +918,6 @@
           if (sortingItemId) {
             const scriptId = normalizeName(sortingItemId).startsWith('dom:') ? normalizeName(sortingItemId).slice(4) : '';
             if (scriptId) setAssignedGroupIdForScriptId(scriptId, sortingTargetGroupId || UNGROUPED_ID);
-            syncAssignmentsFromRenderedLayout();
             saveStore();
           }
 

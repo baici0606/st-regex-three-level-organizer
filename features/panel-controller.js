@@ -58,6 +58,8 @@
   function createPanelController({ scope, blockId, listId, titleText }) {
     const HEADER_ID = `${MODULE_NAME}-${scope}-header`;
     const PANEL_COLLAPSED_KEY = `${MODULE_NAME}:${scope}:panel-collapsed`;
+
+    const activeNativeOrderCache = new Map();
     const GROUP_SELECT_ID = `${MODULE_NAME}-${scope}-group-select`;
     const NEW_GROUP_ID = `${MODULE_NAME}-${scope}-new-group`;
     const RENAME_GROUP_ID = `${MODULE_NAME}-${scope}-rename-group`;
@@ -187,7 +189,13 @@
         if (!script || typeof script !== 'object') return;
         const scriptId = normalizeName(script.id);
         if (scriptId) map.set(`dom:${scriptId}`, script);
-        if (items[index] && items[index].id) map.set(items[index].id, script);
+        
+        for (const [domItemId, cachedIndex] of activeNativeOrderCache.entries()) {
+           if (cachedIndex === index) {
+              map.set(domItemId, script);
+              break;
+           }
+        }
       });
       return map;
     }
@@ -327,7 +335,7 @@
 
       const targetItemIds = getFolderItemIds(groupId, items, currentScripts);
       if (targetItemIds.length < 1) {
-        toast(`[无项目] 当前分类未捕获到任何正则`, 'success', `状态未变`);
+        toast(`目前生效 0 条 (共 0 条)`, 'success', `本次${enabled ? '开启' : '关闭'} 0 条`);
         if (store.disabledSnapshots?.[groupId]) {
           delete store.disabledSnapshots[groupId];
           return true;
@@ -349,11 +357,19 @@
 
       let scriptsChanged = false;
       let changedCount = 0;
-      const nextScripts = currentScripts.map((script, index) => {
+      const nextScripts = currentScripts.map((script, originalIndex) => {
         const scriptId = normalizeName(script?.id);
         let itemId = null;
-        if (scriptId && availableTargetItemIds.has(`dom:${scriptId}`)) itemId = `dom:${scriptId}`;
-        else if (items[index]?.id && availableTargetItemIds.has(items[index].id)) itemId = items[index].id;
+        if (scriptId && availableTargetItemIds.has(`dom:${scriptId}`)) {
+           itemId = `dom:${scriptId}`;
+        } else {
+           for (const [domItemId, cachedIndex] of activeNativeOrderCache.entries()) {
+              if (cachedIndex === originalIndex && availableTargetItemIds.has(domItemId)) {
+                 itemId = domItemId;
+                 break;
+              }
+           }
+        }
 
         if (!itemId) return script;
 
@@ -393,8 +409,16 @@
       for (const script of (scriptsChanged ? nextScripts : currentScripts)) {
         const scriptId = normalizeName(script?.id);
         let itemId = null;
-        if (scriptId && availableTargetItemIds.has(`dom:${scriptId}`)) itemId = `dom:${scriptId}`;
-        else if (items[i]?.id && availableTargetItemIds.has(items[i].id)) itemId = items[i].id;
+        if (scriptId && availableTargetItemIds.has(`dom:${scriptId}`)) {
+           itemId = `dom:${scriptId}`;
+        } else {
+           for (const [domItemId, cachedIndex] of activeNativeOrderCache.entries()) {
+              if (cachedIndex === i && availableTargetItemIds.has(domItemId)) {
+                 itemId = domItemId;
+                 break;
+              }
+           }
+        }
 
         if (itemId && !script.disabled) {
           activeCount++;
@@ -402,14 +426,8 @@
         i++;
       }
 
-      const groupName = getGroupById(groupId)?.name || '未分组';
-      const folderLabel = FOLDER_LABEL;
-      const toastMessage = `▸ ${groupName} [该栏共计 ${targetItemIds.length} 条]
-▸ ${enabled ? '新激活了' : '被拦截了'} ${changedCount} 项
-▸ 内存底包：${currentScripts.length} 项（同步态：${scriptsChanged ? '已变更' : '未穿透'}）
-========
-★ 结算是：目前有 ${activeCount} 条处在生效工作状态！`;
-      const toastTitle = `【${folderLabel}：${enabled ? '一键开启' : '一键关闭'}完毕】`;
+      const toastMessage = `目前生效 ${activeCount} 条 (共 ${targetItemIds.length} 条)`;
+      const toastTitle = `本次${enabled ? '开启' : '关闭'} ${changedCount} 条`;
 
       if (!scriptsChanged) {
         toast(toastMessage, 'success', toastTitle);
@@ -1586,6 +1604,11 @@
       rendering = true;
       try {
         const items = collectItems(listEl);
+        activeNativeOrderCache.clear();
+        for (let i = 0; i < items.length; i++) {
+          activeNativeOrderCache.set(items[i].id, i);
+        }
+        
         migrateLegacyAssignments(items);
         if (alignImportedAssignments(items)) saveStore();
         cleanupAssignments(items);

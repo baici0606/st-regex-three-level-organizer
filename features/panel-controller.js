@@ -799,6 +799,61 @@
       saveStore();
     }
 
+    function getGroupIdFromListChild(listEl, childEl) {
+      if (!(childEl instanceof HTMLElement) || childEl.parentElement !== listEl) return undefined;
+
+      if (childEl.classList.contains('st-rmg-group-header') || childEl.classList.contains('st-rmg-sort-anchor')) {
+        return String(childEl.dataset.groupId || UNGROUPED_ID);
+      }
+
+      if (childEl.classList.contains('regex-script-label')) {
+        let probe = childEl.previousElementSibling;
+        while (probe) {
+          if (probe.classList?.contains('st-rmg-sort-anchor') || probe.classList?.contains('st-rmg-group-header')) {
+            return String(probe.dataset.groupId || UNGROUPED_ID);
+          }
+          probe = probe.previousElementSibling;
+        }
+        return UNGROUPED_ID;
+      }
+
+      return undefined;
+    }
+
+    function getTargetGroupIdFromPointer(listEl, event) {
+      if (typeof document.elementsFromPoint !== 'function') return undefined;
+      const source = event?.originalEvent || event;
+      const clientX = Number(source?.clientX ?? event?.clientX);
+      const clientY = Number(source?.clientY ?? event?.clientY);
+      if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return undefined;
+
+      const hoveredElements = document.elementsFromPoint(clientX, clientY);
+      for (const hoveredElement of hoveredElements) {
+        if (!(hoveredElement instanceof HTMLElement)) continue;
+        if (hoveredElement.classList.contains('ui-sortable-helper') || hoveredElement.classList.contains('ui-sortable-placeholder')) continue;
+        const listChild = hoveredElement.closest('.st-rmg-group-header, .st-rmg-sort-anchor, .regex-script-label');
+        const groupId = getGroupIdFromListChild(listEl, listChild);
+        if (groupId !== undefined) return groupId;
+      }
+
+      return undefined;
+    }
+
+    function movePlaceholderIntoTargetGroup(listEl, event, ui) {
+      const placeholderEl = ui?.placeholder?.[0];
+      if (!(placeholderEl instanceof HTMLElement)) return;
+
+      const targetGroupId = getTargetGroupIdFromPointer(listEl, event);
+      if (!targetGroupId) return;
+
+      const targetAnchor = Array.from(listEl.querySelectorAll('.st-rmg-sort-anchor')).find((anchorEl) => anchorEl.dataset.groupId === targetGroupId);
+      if (!(targetAnchor instanceof HTMLElement)) return;
+      if (placeholderEl.nextElementSibling === targetAnchor) return;
+
+      targetAnchor.insertAdjacentElement('beforebegin', placeholderEl);
+      sortingTargetGroupId = targetGroupId;
+    }
+
     function bindNativeSortableEvents() {
       const listEl = getListEl();
       const $ = getJQuery();
@@ -827,14 +882,11 @@
         });
 
         sortable.sortable('option', 'sort', function (event, ui) {
-          const pointerY = Number(event?.clientY ?? event?.originalEvent?.clientY);
-          if (Number.isFinite(pointerY)) {
-            const hovered = Array.from(listEl.querySelectorAll('.st-rmg-group-header, .st-rmg-sort-anchor')).find((el) => {
-              const rect = el.getBoundingClientRect();
-              return pointerY >= rect.top && pointerY <= rect.bottom;
-            });
-            sortingTargetGroupId = hovered?.dataset?.groupId || sortingTargetGroupId;
+          const hoveredGroupId = getTargetGroupIdFromPointer(listEl, event);
+          if (hoveredGroupId !== undefined) {
+            sortingTargetGroupId = hoveredGroupId;
           }
+          movePlaceholderIntoTargetGroup(listEl, event, ui);
           return typeof originalSort === 'function' ? originalSort.call(this, event, ui) : undefined;
         });
 

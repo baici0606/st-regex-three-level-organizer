@@ -161,10 +161,6 @@
   justify-content: flex-end;
 }
 
-.st-rmg-group-header[data-group-id="__ungrouped__"] .st-rmg-folder-handle {
-  cursor: default;
-  pointer-events: none;
-}
 
 .st-rmg-folder-actions {
   display: inline-flex;

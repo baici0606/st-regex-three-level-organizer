@@ -154,7 +154,9 @@
       }
       if (scriptType === 2) {
         const presetManager = getRegexPresetManager(ctx);
-        const presetScripts = presetManager?.readPresetExtensionField?.({ path: 'regex_scripts' });
+        const presetName = presetManager?.getSelectedPresetName?.();
+        const presetScripts = presetManager?.readPresetExtensionField?.({ name: presetName, path: 'regex_scripts' })
+          ?? presetManager?.readPresetExtensionField?.({ path: 'regex_scripts' });
         return Array.isArray(presetScripts) ? presetScripts : [];
       }
       return [];
@@ -243,6 +245,8 @@
         const presetName = presetManager?.getSelectedPresetName?.();
         if (!presetManager || !presetName) return;
         await presetManager.writePresetExtensionField({ name: presetName, path: 'regex_scripts', value: nextScripts });
+        // 等待写入完成再继续
+        await new Promise((resolve) => window.setTimeout(resolve, 100));
       }
     }
 
@@ -308,7 +312,7 @@
     async function applyFolderDisabledState(groupId, enabled, items = collectItems()) {
       const ctx = getCtx();
       const currentScripts = getScriptsByCurrentScope(ctx);
-      if (!Array.isArray(currentScripts) || currentScripts.length < 1) return false;
+      if (!Array.isArray(currentScripts)) return false;
 
       const targetItemIds = getFolderItemIds(groupId, items, currentScripts);
       if (targetItemIds.length < 1) {
@@ -326,6 +330,78 @@
           .map((script) => [`dom:${normalizeName(script.id)}`, script])
       );
       const availableTargetItemIds = new Set(targetItemIds.filter((itemId) => availableScriptsByItemId.has(itemId)));
+
+      // === DOM-based fallback：脚本数据不可读时（如预设正则），直接操作 checkbox ===
+      if (availableTargetItemIds.size < 1) {
+        const itemById = new Map(items.map(item => [item.id, item]));
+
+        if (!store.disabledSnapshots || typeof store.disabledSnapshots !== 'object') {
+          store.disabledSnapshots = {};
+        }
+
+        const existingSnapshot = store.disabledSnapshots[groupId] && typeof store.disabledSnapshots[groupId] === 'object'
+          ? { ...store.disabledSnapshots[groupId] } : {};
+        const nextSnapshot = {};
+        let changedCount = 0;
+        let snapshotChanged = false;
+
+        for (const itemId of targetItemIds) {
+          const item = itemById.get(itemId);
+          if (!item?.el) continue;
+          const checkbox = item.el.querySelector('input[type=checkbox]');
+          if (!checkbox) continue;
+          const currentlyActive = checkbox.checked;
+
+          if (!enabled) {
+            // 关闭：保存当前状态到快照，然后禁用
+            if (!Object.prototype.hasOwnProperty.call(existingSnapshot, itemId)) {
+              nextSnapshot[itemId] = currentlyActive;
+              snapshotChanged = true;
+            } else {
+              nextSnapshot[itemId] = existingSnapshot[itemId];
+            }
+            if (currentlyActive) {
+              checkbox.click();
+              changedCount++;
+            }
+          } else {
+            // 开启：从快照恢复状态
+            if (!Object.prototype.hasOwnProperty.call(existingSnapshot, itemId)) continue;
+            const shouldBeActive = !!existingSnapshot[itemId];
+            snapshotChanged = true;
+            if (!currentlyActive && shouldBeActive) {
+              checkbox.click();
+              changedCount++;
+            }
+          }
+        }
+
+        const hadSnapshot = Object.prototype.hasOwnProperty.call(store.disabledSnapshots, groupId);
+        if (!enabled && Object.keys(nextSnapshot).length > 0) {
+          store.disabledSnapshots[groupId] = nextSnapshot;
+        } else if (hadSnapshot) {
+          delete store.disabledSnapshots[groupId];
+          snapshotChanged = true;
+        }
+        if (snapshotChanged) saveStore();
+
+        // 等待 ST 事件处理器更新状态后再统计
+        if (changedCount > 0) await new Promise((resolve) => window.setTimeout(resolve, 80));
+
+        const activeCount = targetItemIds.filter(itemId => {
+          const item = itemById.get(itemId);
+          return item?.el?.querySelector('input[type=checkbox]')?.checked;
+        }).length;
+
+        toast(`目前生效 ${activeCount} 条 (共 ${targetItemIds.length} 条)`, 'success', `本次${enabled ? '开启' : '关闭'} ${changedCount} 条`);
+        if (changedCount > 0) {
+          refreshAllPanels();
+          schedule(() => renderTree().catch(() => {}));
+        }
+        return snapshotChanged || changedCount > 0;
+      }
+
+      // === 标准 API 路径（全局/局部正则，脚本数据可读）===
       const existingSnapshotSource = store.disabledSnapshots?.[groupId];
       const existingSnapshot = existingSnapshotSource && typeof existingSnapshotSource === 'object' ? { ...existingSnapshotSource } : {};
       const nextSnapshot = {};
@@ -377,14 +453,14 @@
         snapshotChanged = true;
       }
 
-      // 统计文件夹内目前生效条数
+      const totalCount = availableTargetItemIds.size;
       const activeCount = (scriptsChanged ? nextScripts : currentScripts)
         .filter((script) => {
           const sid = normalizeName(script?.id);
           return sid && availableTargetItemIds.has(`dom:${sid}`) && !script.disabled;
         }).length;
 
-      const toastMessage = `目前生效 ${activeCount} 条 (共 ${availableTargetItemIds.size} 条)`;
+      const toastMessage = `目前生效 ${activeCount} 条 (共 ${totalCount} 条)`;
       const toastTitle = `本次${enabled ? '开启' : '关闭'} ${changedCount} 条`;
 
       if (!scriptsChanged) {
@@ -398,7 +474,6 @@
       toast(toastMessage, 'success', toastTitle);
       return true;
     }
-
 
     async function setFolderEnabled(groupId, enabled) {
       const items = collectItems();
@@ -704,6 +779,18 @@
         toast('当前范围的正则列表不可用，导入失败', 'error');
         return;
       }
+
+      // 预设正则：如果读取到的脚本数据为空，说明该 ST 版本的预设 API 不支持写入
+      // 导入会保存到无效路径，刷新后脚本消失，直接提示不支持
+      if (currentScripts.length === 0 && getScriptType() === 2) {
+        const testPm = getRegexPresetManager(ctx);
+        const testName = testPm?.getSelectedPresetName?.();
+        if (!testPm || !testName) {
+          toast('当前 ST 版本的预设正则不支持通过此插件导入脚本，请直接在 ST 的预设正则面板手动添加', 'warning');
+          return;
+        }
+      }
+
 
       let nextGroupId = uid('group');
       while (getGroupById(nextGroupId)) {

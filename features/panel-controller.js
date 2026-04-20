@@ -153,8 +153,18 @@
       if (scriptType === 2) {
         const presetManager = getRegexPresetManager(ctx);
         const presetName = presetManager?.getSelectedPresetName?.();
-        const presetScripts = presetManager?.readPresetExtensionField?.({ name: presetName, path: 'regex_scripts' });
-        return Array.isArray(presetScripts) ? presetScripts : [];
+        let presetScripts = presetManager?.readPresetExtensionField?.({ name: presetName, path: 'regex_scripts' });
+        if (!Array.isArray(presetScripts)) presetScripts = presetManager?.readPresetExtensionField?.({ path: 'regex_scripts' });
+        if (Array.isArray(presetScripts)) return presetScripts;
+
+        const presetObj = root.utils.getSelectedRegexPreset?.(ctx);
+        if (presetObj) {
+           return Array.isArray(presetObj.extensions?.regex_scripts) ? presetObj.extensions.regex_scripts
+             : Array.isArray(presetObj.data?.extensions?.regex_scripts) ? presetObj.data.extensions.regex_scripts
+             : Array.isArray(presetObj.regex_scripts) ? presetObj.regex_scripts
+             : [];
+        }
+        return [];
       }
       return [];
     }
@@ -305,8 +315,9 @@
       if (!Array.isArray(currentScripts)) return false;
 
       const targetItemIds = getFolderItemIds(groupId, items, currentScripts);
+      let targetActiveCount = 0;
       if (targetItemIds.length < 1) {
-        toast(`本次${enabled ? '开启' : '关闭'} 0 条正则\n(该文件夹共 0 条 / 当前已生效 0 条)`, 'success');
+        toast(`本次${enabled ? '开启' : '关闭'} 0 条　|　目前生效 0 条 (共 0 条)`, 'success');
         if (store.disabledSnapshots?.[groupId]) {
           delete store.disabledSnapshots[groupId];
           return true;
@@ -381,7 +392,7 @@
         i++;
       }
 
-      const toastMessage = `本次${enabled ? '开启' : '关闭'} ${changedCount} 条正则\n(该文件夹共 ${targetItemIds.length} 条 / 当前已生效 ${activeCount} 条)`;
+      const toastMessage = `本次${enabled ? '开启' : '关闭'} ${changedCount} 条　|　目前生效 ${activeCount} 条 (共 ${targetItemIds.length} 条)`;
 
       if (!scriptsChanged) {
         toast(toastMessage, 'success');

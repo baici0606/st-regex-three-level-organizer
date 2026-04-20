@@ -159,7 +159,10 @@
 
         const presetObj = root.utils.getSelectedRegexPreset?.(ctx);
         if (presetObj) {
-           return Array.isArray(presetObj.extensions?.regex_scripts) ? presetObj.extensions.regex_scripts
+           if (Array.isArray(presetObj)) return presetObj;
+           return Array.isArray(presetObj.regex) ? presetObj.regex
+             : Array.isArray(presetObj.extensions?.regex) ? presetObj.extensions.regex
+             : Array.isArray(presetObj.extensions?.regex_scripts) ? presetObj.extensions.regex_scripts
              : Array.isArray(presetObj.data?.extensions?.regex_scripts) ? presetObj.data.extensions.regex_scripts
              : Array.isArray(presetObj.regex_scripts) ? presetObj.regex_scripts
              : [];

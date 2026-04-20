@@ -1,5 +1,6 @@
 (function () {
   'use strict';
+  console.log("=== ST-REGEX-THREE-LEVEL-ORGANIZER JS V2 is active ===");
 
   const root = window.STRegexManualGroups = window.STRegexManualGroups || {};
   if (root.features?.panelController) return;
@@ -131,8 +132,6 @@
     }
 
     function getFolderState(groupId, items = collectItems()) {
-      const folderScriptIds = getFolderScriptIds(groupId);
-      if (folderScriptIds.size < 1) return STATE_ENABLED;
       return store.disabledFolders?.[groupId] ? STATE_DISABLED : STATE_ENABLED;
     }
 
@@ -281,15 +280,12 @@
     function getFolderItemIds(groupId, items = collectItems(), currentScripts = getScriptsByCurrentScope()) {
       const folderScriptIds = getFolderScriptIds(groupId, currentScripts);
       const itemIds = new Set();
+      const validGroupIds = new Set(store.groups.map(g => g.id));
 
       for (const item of items) {
-        const scriptId = normalizeName(item.keyCandidate) || getScriptIdFromItemId(item.id);
-        if (scriptId && folderScriptIds.has(scriptId)) {
-          itemIds.add(item.id);
-          continue;
-        }
-
-        if (groupId === UNGROUPED_ID && !scriptId && !store.assignments[item.id]) {
+        const assignedGroupId = store.assignments[item.id];
+        const actualGroupId = (assignedGroupId && validGroupIds.has(assignedGroupId)) ? assignedGroupId : UNGROUPED_ID;
+        if (actualGroupId === groupId) {
           itemIds.add(item.id);
         }
       }
@@ -375,9 +371,7 @@
 
     async function setFolderEnabled(groupId, enabled) {
       const items = collectItems();
-      const itemIds = new Set(getFolderItemIds(groupId, items, getScriptsByCurrentScope()));
-      if (itemIds.size < 1) return;
-
+      
       pendingViewportRestore = captureViewportState(getHeaderEl());
 
       if (!store.disabledFolders || typeof store.disabledFolders !== 'object') {
@@ -470,8 +464,8 @@
 
       const scripts = Array.isArray(parsed.scripts)
         ? parsed.scripts
-            .map((script) => cloneJsonData(script, null))
-            .filter((script) => script && typeof script === 'object')
+          .map((script) => cloneJsonData(script, null))
+          .filter((script) => script && typeof script === 'object')
         : [];
       if (scripts.length < 1) {
         throw new Error('导入文件中没有可用的正则数据');
@@ -612,7 +606,7 @@
           if (!Array.isArray(pendingImportedAssignments) || pendingImportedAssignments.length < 1) return;
 
           Promise.resolve(renderTree())
-            .catch(() => {})
+            .catch(() => { })
             .finally(() => {
               if (pendingImportedAssignments.length > 0) {
                 queuePostImportRenderRetries(attempt + 1, maxAttempts);
@@ -1016,9 +1010,8 @@
         const header = document.createElement('div');
         header.className = 'st-rmg-group-header';
         header.dataset.groupId = groupId;
-        header.classList.add('st-rmg-folder-draggable');
-        if (groupId === UNGROUPED_ID) {
-          header.classList.add('st-rmg-folder-not-draggable');
+        if (groupId !== UNGROUPED_ID) {
+          header.classList.add('st-rmg-folder-draggable');
         }
         const folderState = getFolderState(groupId, items);
         const toggleTitle = folderState === STATE_DISABLED ? `启用${FOLDER_LABEL}` : `关闭${FOLDER_LABEL}`;
@@ -1026,31 +1019,20 @@
           header.classList.add('st-rmg-folder-disabled');
         }
         header.innerHTML = `
-          <span class="st-rmg-folder-handle" draggable="true" title="拖动排序" aria-label="拖动排序">&#8801;</span>
+          <span class="st-rmg-folder-handle" draggable="${groupId !== UNGROUPED_ID ? 'true' : 'false'}" ${groupId !== UNGROUPED_ID ? 'title="拖动排序" aria-label="拖动排序"' : 'aria-hidden="true"'}>&#8801;</span>
           <span class="st-rmg-group-labels">
             <span class="st-rmg-group-name">${escapeHtml(title)}</span>
             <span class="st-rmg-group-count">(${count})</span>
           </span>
           <span class="st-rmg-folder-controls">
-            ${groupId !== UNGROUPED_ID ? `
-              <span class="st-rmg-folder-actions">
-                <button type="button" class="menu_button interactable st-rmg-folder-action" data-folder-export="${escapeHtml(groupId)}" title="导出当前${FOLDER_LABEL}" aria-label="导出当前${FOLDER_LABEL}">
-                  <span class="st-rmg-folder-export-icon" aria-hidden="true">
-                    <span class="st-rmg-folder-export-arrow">↑</span>
-                    <span class="st-rmg-folder-export-tray"></span>
-                  </span>
-                </button>
-              </span>
-            ` : `
-              <span class="st-rmg-folder-actions is-placeholder" aria-hidden="true">
-                <button type="button" class="menu_button st-rmg-folder-action st-rmg-folder-action-placeholder" tabindex="-1" disabled aria-hidden="true">
-                  <span class="st-rmg-folder-export-icon" aria-hidden="true">
-                    <span class="st-rmg-folder-export-arrow">↑</span>
-                    <span class="st-rmg-folder-export-tray"></span>
-                  </span>
-                </button>
-              </span>
-            `}
+            <span class="st-rmg-folder-actions">
+              <button type="button" class="menu_button interactable st-rmg-folder-action" data-folder-export="${escapeHtml(groupId)}" title="导出当前${FOLDER_LABEL}" aria-label="导出当前${FOLDER_LABEL}">
+                <span class="st-rmg-folder-export-icon" aria-hidden="true">
+                  <span class="st-rmg-folder-export-arrow">↑</span>
+                  <span class="st-rmg-folder-export-tray"></span>
+                </span>
+              </button>
+            </span>
             <button type="button" class="st-rmg-folder-switch ${folderState === STATE_DISABLED ? 'is-off' : 'is-on'}" data-folder-toggle="${escapeHtml(groupId)}" title="${escapeHtml(toggleTitle)}" aria-pressed="${folderState === STATE_DISABLED ? 'false' : 'true'}">
               <span class="st-rmg-folder-switch-track">
                 <span class="st-rmg-folder-switch-thumb"></span>
@@ -1329,7 +1311,7 @@
           const result = originalStop ? originalStop.apply(this, args) : undefined;
 
           Promise.resolve(result)
-            .catch(() => {})
+            .catch(() => { })
             .then(async () => {
               if (!sortingItemId) return;
               const nextGroupId = store.assignments[sortingItemId] ?? null;
@@ -1635,13 +1617,26 @@
       if (listEl.dataset.stRmgBound === '1') return;
       listEl.dataset.stRmgBound = '1';
 
+      listEl.addEventListener('mousedown', (e) => {
+        const handleEl = e.target?.closest?.('.st-rmg-folder-handle');
+        if (!handleEl) return;
+        const headerEl = handleEl.closest('.st-rmg-group-header');
+        if (headerEl && headerEl.dataset.groupId === UNGROUPED_ID) {
+          toast('未分组无法拖拽', 'warning');
+        }
+      });
+
       listEl.addEventListener('click', (e) => {
         const exportBtn = e.target?.closest?.('[data-folder-export]');
         if (exportBtn) {
           e.preventDefault();
           e.stopPropagation();
           const groupId = String(exportBtn.dataset.folderExport || '');
-          if (groupId) void exportGroup(groupId);
+          if (groupId === UNGROUPED_ID) {
+            toast(`未分组无法导出`, 'warning');
+          } else if (groupId) {
+            void exportGroup(groupId);
+          }
           return;
         }
 
